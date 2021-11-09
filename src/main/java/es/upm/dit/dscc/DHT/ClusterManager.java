@@ -13,33 +13,40 @@ import java.util.List;
 import java.util.Random;
 
 
-public class ClusterManager {
-
-    ClusterManager(){}
-
-    //Number of servers needed
-    private int Quorum;
+public class ClusterManager extends Thread {
 
     //Zookeeper configuration
-    String[] hosts = {"127.0.0.1:2181", "127.0.0.1:2181", "127.0.0.1:2181"};
+    String[] hosts;
     private ZooKeeper zk;
-    private static String rootMembers = "/members";
-    private static String rootManagement = "/management";
-    private static String rootOperations = "/operations";
-    private static String manager = "/manager";
+    private static String rootMembers;
+    private static String rootManagement;
+    private static String rootOperations;
+    private static String manager;
     Integer mutexBarrier = -1;
     private String myId;
     private static final int SESSION_TIMEOUT = 5000;
 
-    //Logger configuration
+    ClusterManager(){
+        Common c = new Common();
+        rootMembers = c.rootMembers;
+        rootOperations = c.rootOperations;
+        manager = c.manager;
+        rootManagement = c.rootManagement;
+        hosts = c.hosts;
+    }
+
+    //Number of servers needed
+    private int Quorum; //TODO Definir esto
+
+    //Logger configuration TODO Configurar esto bien
     static Logger logger = Logger.getLogger(ClusterManager.class);
     String userDirectory = System.getProperty("user.dir");
     String log4jConfPath = userDirectory + "/src/main/java/es/upm/dit/dscc/DHT/log4j.properties";
     boolean config_log4j = false;
 
-    //Creates operations, members, and management nodes and subnodes.
 
     public void init(){
+        //Log4j config
         if (config_log4j) {
             try {
                 System.out.println(log4jConfPath);
@@ -72,7 +79,7 @@ public class ClusterManager {
             System.out.println("Exception while creating the session");
         }
 
-        // Create a zNode "member", if it does not exist
+        // Create zookeeper session if it doesn't exist
 
         if (zk != null) {
             // Create a folder for members and include this process/server
@@ -87,6 +94,7 @@ public class ClusterManager {
                     System.out.println(response);
                 }
 
+                // Create a node with the name "operations", if it is not created
                 s = zk.exists(rootOperations, operationsWatcher);
                 if (s == null) {
                     response = zk.create(rootOperations, new byte[0],
@@ -94,6 +102,7 @@ public class ClusterManager {
                     System.out.println(response);
                 }
 
+                // Create a node with the name "management", if it is not created
                 s = zk.exists(rootManagement, managementWatcher);
                 if (s == null) {
                     // Created the znode, if it is not created.
@@ -109,13 +118,14 @@ public class ClusterManager {
 
                 myId = myId.replace(rootMembers + "/", "");
 
-                // Get the children of a node and set a watcer
+                // Get the children of a node and set a watcher
                 List<String> list = zk.getChildren(rootMembers, membersWatcher, s); //this, s);
                 System.out.println("Created znode nember id:"+ myId );
                 printListMembers(list);
 
             } catch (KeeperException e) {
                 System.out.println("The session with Zookeeper failes. Closing");
+                System.out.println(e);
                 return;
             } catch (InterruptedException e) {
                 System.out.println("InterruptedException raised");
@@ -123,8 +133,6 @@ public class ClusterManager {
 
         }
     }
-
-
 
      /**
      * This variable creates a new watcher. It is fired when the session
@@ -147,7 +155,7 @@ public class ClusterManager {
      */
     private Watcher  membersWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------Watcher for  members------------------\n");
+            System.out.println("------------------ClusterManager:Watcher for  members------------------\n");
             try {
                 List<String> list = zk.getChildren(rootMembers,  membersWatcher);
                 printListMembers(list);
@@ -157,10 +165,10 @@ public class ClusterManager {
         }
     };
 
-
+    //Watcher for operations events
     private Watcher operationsWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------Watcher for operations------------------\n");
+            System.out.println("------------------ ClusterManager: Watcher for operations ------------------\n");
             try {
                 List<String> list = zk.getChildren(rootOperations,  operationsWatcher);
                 printListMembers(list);
@@ -170,9 +178,10 @@ public class ClusterManager {
         }
     };
 
+    //Watcher for management events
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------Watcher for management------------------\n");
+            System.out.println("------------------ClusterManager:Watcher for management------------------\n");
             try {
                 List<String> list = zk.getChildren(rootManagement,  managementWatcher);
                 printListMembers(list);
@@ -184,7 +193,7 @@ public class ClusterManager {
 
 
     /**
-     * Print a list
+     * Print a list of the nodes of memberes
      * @param list The list to be printed
      */
     private void printListMembers (List<String> list) {
@@ -197,10 +206,19 @@ public class ClusterManager {
 
     }
 
-
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
         ClusterManager clusterManager = new ClusterManager();
         clusterManager.init();
+        System.out.println("Inited manager");
+        DHT dht1 = new DHT();
+        System.out.println("New DHT");
+        dht1.init();
+        System.out.println("Inited");
+        dht1.sendOperation(OperationEnum.PUT_MAP,"AAAA",new DHT_Map("a",2));
+        System.out.println("Operation sended");
+        while (true){
+            sleep(1000);
+        }
     }
 }
 
