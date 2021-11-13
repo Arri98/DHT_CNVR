@@ -1,5 +1,6 @@
 package es.upm.dit.dscc.DHT;
 
+import org.apache.commons.lang.SerializationUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.PropertyConfigurator;
 
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.Random;
 
 
-public class ClusterManager extends Thread {
+public class ClusterManager implements Watcher {
 
     //Zookeeper configuration
     String[] hosts;
@@ -22,18 +23,14 @@ public class ClusterManager extends Thread {
     private static String rootManagement;
     private static String rootOperations;
     private static String manager;
+    private static String aTable;
+    private static String tableAssignments;
     Integer mutexBarrier = -1;
     private String myId;
     private static final int SESSION_TIMEOUT = 5000;
-
-    ClusterManager(){
-        Common c = new Common();
-        rootMembers = c.rootMembers;
-        rootOperations = c.rootOperations;
-        manager = c.manager;
-        rootManagement = c.rootManagement;
-        hosts = c.hosts;
-    }
+    private String[] DHTs;
+    private int numberOfDHTs = 0;
+    private int replicationFactor;
 
     //Number of servers needed
     private int Quorum; //TODO Definir esto
@@ -44,6 +41,22 @@ public class ClusterManager extends Thread {
     String log4jConfPath = userDirectory + "/src/main/java/es/upm/dit/dscc/DHT/log4j.properties";
     boolean config_log4j = false;
 
+
+    ClusterManager(int Quorum,int replicationFactor){
+        Common c = new Common();
+        rootMembers = c.rootMembers;
+        rootOperations = c.rootOperations;
+        manager = c.manager;
+        rootManagement = c.rootManagement;
+        hosts = c.hosts;
+        aTable = c.aTable;
+        this.Quorum = Quorum;
+        DHTs = new String[Quorum];
+        this.replicationFactor = replicationFactor;
+        tableAssignments = c.tableAssignments;
+    }
+
+    /* ---------------------Initialization ---------------------------------  */
 
     public void init(){
         //Log4j config
@@ -111,6 +124,15 @@ public class ClusterManager extends Thread {
                     System.out.println(response);
                 }
 
+                // Create a node with the name tableAssingmets, if it is not created
+                s = zk.exists(rootManagement + tableAssignments, null);
+                if (s == null) {
+                    // Created the znode, if it is not created.
+                    response = zk.create(rootManagement + tableAssignments, new byte[0],
+                            Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    System.out.println(response);
+                }
+
 
                 // Create a znode for registering as member and get my id
                 myId = zk.create(rootMembers + manager, new byte[0],
@@ -119,7 +141,7 @@ public class ClusterManager extends Thread {
                 myId = myId.replace(rootMembers + "/", "");
 
                 // Get the children of a node and set a watcher
-                List<String> list = zk.getChildren(rootMembers, membersWatcher, s); //this, s);
+                List<String> list = zk.getChildren(rootMembers, membersWatcher, s);
                 System.out.println("Created znode nember id:"+ myId );
                 printListMembers(list);
 
@@ -148,24 +170,49 @@ public class ClusterManager extends Thread {
         }
     };
 
+    /* ---------------------Functions for members---------------------------------  */
 
     /**
      * This variable creates a new watcher. It is fired when a child of "members"
      * is created or deleted.
      */
+
+
     private Watcher  membersWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------ClusterManager:Watcher for  members------------------\n");
             try {
+                //Miramos en el watcher si tenemos algun nodo nuevo
                 List<String> list = zk.getChildren(rootMembers,  membersWatcher);
                 printListMembers(list);
+                for (Iterator<String> iterator = list.iterator(); iterator.hasNext();) {
+                    String member = iterator.next();
+                    Boolean exists = false;
+                    for(int i = 0; i< DHTs.length; i++){
+                        if( member.equals( DHTs[i])){
+                            exists = true;
+                        }
+                    }
+                    //Si tenemos un nodo nuevo y no hemos llegado al quorum le asignamos su tablas y replicas
+                    if(!exists  && !member.equals("manager") && numberOfDHTs<Quorum){
+                        writeTableAssigment(assignTable(member,numberOfDHTs));
+                        DHTs[numberOfDHTs] = member; //Guardamos el nodo nuevo
+                        numberOfDHTs++; //Ahora tenemos un miembro nuevo
+                        System.out.println("Added new member "+member);
+                    }else if(numberOfDHTs>=Quorum){
+                        System.out.println("No more servers needed");
+                    }
+                }
             } catch (Exception e) {
+                System.out.println(e);
                 System.out.println("Exception: watcherMember");
             }
         }
     };
 
-    //Watcher for operations events
+    /* ---------------------Functions for operations---------------------------------  */
+
+    //Watcher for operations events, no hacemos nada con ellas por ahora
     private Watcher operationsWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------ ClusterManager: Watcher for operations ------------------\n");
@@ -178,7 +225,10 @@ public class ClusterManager extends Thread {
         }
     };
 
-    //Watcher for management events
+
+    /* ---------------------Functions for management---------------------------------  */
+
+    //Watcher for management events, los escribimos nosotros asi que no escuchamos
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------ClusterManager:Watcher for management------------------\n");
@@ -191,9 +241,64 @@ public class ClusterManager extends Thread {
         }
     };
 
+    //Asigna las tablas de la siguiente manera: si tenemos 3 tablas y replicacion 2 el primer servidor es el lider de la 0 y replica de 1 y 2.
+    // el segundo lider de la 1 y replica de 2 y 0 y el tercero lider de 2 y replica de 1 y 2.
+    private TableAssigment assignTable(String member,int table){ //Number = number of the leader, table = id of table.
+        int[] replicas = new int[replicationFactor];
+        //Calculamos lo indicado antes.
+        if(table<Quorum){
+            int replica = table;
+            for(int i= 0; i < replicationFactor; i++){
+                if((replica+1)<Quorum){
+                    replica++;
+                    replicas[i]= replica;
+                }else{
+                    replica=0;
+                    replicas[i]= replica;
+                }
+            }
+        }
+        TableAssigment assigment = new TableAssigment(table,replicas,member);
+        System.out.println("Created table assigment with:");
+        System.out.println("Leader: " + assigment.getTableLeader());
+        for (int replica: assigment.getTableReplicas()) {
+            System.out.println("Replica : " + replica);
+        }
+        return assigment;
+    }
+    //Escribimos la asignacion
+    private void writeTableAssigment(TableAssigment assigment){
+        byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
+        if (zk != null) {
+            try {
+                // Si el nodo management existe añadimos un hijo con nuestra operacion
+                String response = new String();
+                Stat s = zk.exists(rootManagement + tableAssignments , managementWatcher);
+                if (s != null) {
+                    // Created the znode, if it is not created.
+                    System.out.println("Creating assignment node");
+                    List<String> list = zk.getChildren(rootManagement + tableAssignments, null, s);
+                    response = zk.create(rootManagement + tableAssignments +aTable, data,
+                            ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
+                    System.out.println(response);
+                } else {
+                    System.out.println("Node table doesnt exists");
+                }
+            } catch (KeeperException e) {
+                System.out.println("The session with Zookeeper failes. Closing");
+                System.out.println(e);
+                return;
+            } catch (InterruptedException e) {
+                System.out.println("InterruptedException raised");
+            }
+        }
+    }
+
+
+    /* ---------------------Main and common functions functions ---------------------------------  */
 
     /**
-     * Print a list of the nodes of memberes
+     * Print a list of the nodes
      * @param list The list to be printed
      */
     private void printListMembers (List<String> list) {
@@ -206,18 +311,26 @@ public class ClusterManager extends Thread {
 
     }
 
-    public static void main(String[] args) throws InterruptedException {
-        ClusterManager clusterManager = new ClusterManager();
+
+    //Esto es para implementar la clase watcher(lo pide por algun motivo) y que no se nos mueran los procesos.
+    @Override
+    public void process(WatchedEvent event) {
+        try {
+            System.out.println("Unexpected invocated this method. Process of the object");
+        } catch (Exception e) {
+            System.out.println("Unexpected exception. Process of the object");
+        }
+    }
+
+
+    public static void main(String[] args) {
+        ClusterManager clusterManager = new ClusterManager(3,2);
         clusterManager.init();
         System.out.println("Inited manager");
-        DHT dht1 = new DHT();
-        System.out.println("New DHT");
-        dht1.init();
-        System.out.println("Inited");
-        dht1.sendOperation(OperationEnum.PUT_MAP,"AAAA",new DHT_Map("a",2));
-        System.out.println("Operation sended");
-        while (true){
-            sleep(1000);
+        try {
+            Thread.sleep(300000000);
+        } catch (Exception e) {
+            System.out.println("Exception in the sleep in main");
         }
     }
 }

@@ -184,7 +184,7 @@
   </association>  
   <association id="35">    
     <end type="SOURCE" refId="6" navigable="false">      
-      <attribute id="36" name="operation">        
+      <attribute id="36" name="DHTPetition">
         <position height="0" width="0" x="-155" y="3"/>      
       </attribute>      
       <multiplicity id="37" minimum="0" maximum="1">        

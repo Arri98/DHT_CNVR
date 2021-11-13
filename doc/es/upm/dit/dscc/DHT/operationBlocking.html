@@ -114,7 +114,7 @@ extends java.lang.Object</pre>
 <dt><span class="simpleTagLabel">Author:</span></dt>
 <dd>aalonso
  This class implements a monitor for synchronazing threads
- It allows a thread to wait until the result of an operation 
+ It allows a thread to wait until the result of an DHTPetition
  is received. It is related to remote operations that requires 
  to provide a response</dd>
 </dl>
@@ -155,14 +155,14 @@ extends java.lang.Object</pre>
 </tr>
 <tr id="i0" class="altColor">
 <td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../../../es/upm/dit/dscc/DHT/OperationBlocking.html#receiveOperation-es.upm.dit.dscc.DHT.OperationsDHT-">receiveOperation</a></span>(<a href="../../../../../es/upm/dit/dscc/DHT/OperationsDHT.html" title="class in es.upm.dit.dscc.DHT">OperationsDHT</a>&nbsp;operation)</code>
-<div class="block">This method is invoked when a requested operation is received.</div>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../../../es/upm/dit/dscc/DHT/OperationBlocking.html#receiveOperation-es.upm.dit.dscc.DHT.OperationsDHT-">receiveOperation</a></span>(<a href="../../../../../es/upm/dit/dscc/DHT/OperationsDHT.html" title="class in es.upm.dit.dscc.DHT">OperationsDHT</a>&nbsp;DHTPetition)</code>
+<div class="block">This method is invoked when a requested DHTPetition is received.</div>
 </td>
 </tr>
 <tr id="i1" class="rowColor">
 <td class="colFirst"><code><a href="../../../../../es/upm/dit/dscc/DHT/OperationsDHT.html" title="class in es.upm.dit.dscc.DHT">OperationsDHT</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../../../es/upm/dit/dscc/DHT/OperationBlocking.html#sendOperation--">sendOperation</a></span>()</code>
-<div class="block">Wait when a remote operation has been requested.</div>
+<div class="block">Wait when a remote DHTPetition has been requested.</div>
 </td>
 </tr>
 </table>
@@ -211,12 +211,12 @@ extends java.lang.Object</pre>
 <li class="blockList">
 <h4>sendOperation</h4>
 <pre>public&nbsp;<a href="../../../../../es/upm/dit/dscc/DHT/OperationsDHT.html" title="class in es.upm.dit.dscc.DHT">OperationsDHT</a>&nbsp;sendOperation()</pre>
-<div class="block">Wait when a remote operation has been requested. 
- The calling thread is continued when the operation is
+<div class="block">Wait when a remote DHTPetition has been requested.
+ The calling thread is continued when the DHTPetition is
  received</div>
 <dl>
 <dt><span class="returnLabel">Returns:</span></dt>
-<dd>The received operation</dd>
+<dd>The received DHTPetition</dd>
 </dl>
 </li>
 </ul>
@@ -226,12 +226,12 @@ extends java.lang.Object</pre>
 <ul class="blockListLast">
 <li class="blockList">
 <h4>receiveOperation</h4>
-<pre>public&nbsp;void&nbsp;receiveOperation(<a href="../../../../../es/upm/dit/dscc/DHT/OperationsDHT.html" title="class in es.upm.dit.dscc.DHT">OperationsDHT</a>&nbsp;operation)</pre>
-<div class="block">This method is invoked when a requested operation is received.
+<pre>public&nbsp;void&nbsp;receiveOperation(<a href="../../../../../es/upm/dit/dscc/DHT/OperationsDHT.html" title="class in es.upm.dit.dscc.DHT">OperationsDHT</a>&nbsp;DHTPetition)</pre>
+<div class="block">This method is invoked when a requested DHTPetition is received.
  Then, the waiting thread is unblocked</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
-<dd><code>operation</code> - The received operation</dd>
+<dd><code>DHTPetition</code> - The received DHTPetition</dd>
 </dl>
 </li>
 </ul>
