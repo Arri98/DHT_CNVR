@@ -28,6 +28,7 @@ public class ClusterManager implements Watcher {
     Integer mutexBarrier = -1;
     private String myId;
     private static final int SESSION_TIMEOUT = 5000;
+
     private String[] DHTs;
     private int numberOfDHTs = 0;
     private int replicationFactor;
@@ -42,7 +43,7 @@ public class ClusterManager implements Watcher {
     boolean config_log4j = false;
 
 
-    ClusterManager(int Quorum,int replicationFactor){
+    ClusterManager(int Quorum,int replicationFactor,String[] DHTs){
         Common c = new Common();
         rootMembers = c.rootMembers;
         rootOperations = c.rootOperations;
@@ -51,9 +52,14 @@ public class ClusterManager implements Watcher {
         hosts = c.hosts;
         aTable = c.aTable;
         this.Quorum = Quorum;
-        DHTs = new String[Quorum];
+        if(DHTs == null){
+            this.DHTs = new String[Quorum];
+        }else{
+            this.DHTs = DHTs;
+        }
         this.replicationFactor = replicationFactor;
         tableAssignments = c.tableAssignments;
+
     }
 
     /* ---------------------Initialization ---------------------------------  */
@@ -183,26 +189,57 @@ public class ClusterManager implements Watcher {
             System.out.println("------------------ClusterManager:Watcher for  members------------------\n");
             try {
                 //Miramos en el watcher si tenemos algun nodo nuevo
+                Boolean watcherFound = false; //Miramos si no se nos ha caido el que mira si nos caemos nosotros
                 List<String> list = zk.getChildren(rootMembers,  membersWatcher);
                 printListMembers(list);
                 for (Iterator<String> iterator = list.iterator(); iterator.hasNext();) {
                     String member = iterator.next();
+                    //Esto para ver si es una DHT que ya tenemos
                     Boolean exists = false;
                     for(int i = 0; i< DHTs.length; i++){
                         if( member.equals( DHTs[i])){
                             exists = true;
                         }
                     }
-                    //Si tenemos un nodo nuevo y no hemos llegado al quorum le asignamos su tablas y replicas
-                    if(!exists  && !member.equals("manager") && numberOfDHTs<Quorum){
-                        writeTableAssigment(assignTable(member,numberOfDHTs));
-                        DHTs[numberOfDHTs] = member; //Guardamos el nodo nuevo
+                    //Si tenemos una DHT nueva y no hemos llegado al quorum le asignamos su tablas y replicas
+                    //Ya que estamos miramos si el watcher sigue vivo
+                    if(!exists  && !member.equals("manager") && !member.equals("listener") && numberOfDHTs<Quorum){
+                        int position = writeTableAssigment(assignTable(member));
+                        DHTs[position] = member; //Guardamos el nodo nuevo
+                        System.out.println(position);
                         numberOfDHTs++; //Ahora tenemos un miembro nuevo
                         System.out.println("Added new member "+member);
-                    }else if(numberOfDHTs>=Quorum){
-                        System.out.println("No more servers needed");
+                    }else if(member.equals("listener") ){
+                        watcherFound = true;
                     }
                 }
+                if(watcherFound){
+                    System.out.println("ManagerWatcher still up");
+                }else{
+                    System.out.println("ManagerWatcher id down, we should create a new one");
+                }
+
+                if(numberOfDHTs>=Quorum){
+                    System.out.println("No more servers needed");
+                }
+                //Miramos si se ha caido algun nodo de los de la DHT
+                for(int i = 0; i<DHTs.length; i++){
+                    if(DHTs[i] != null ){
+                        Boolean exists = false;
+                        for(Iterator<String> iterator = list.iterator(); iterator.hasNext();){
+                            if(iterator.next().equals(DHTs[i])){
+                                exists =  true;
+                                break;
+                            }
+                        }
+                        if(!exists){
+                            System.out.println("Node "+ DHTs[i] + " has failed");
+                            numberOfDHTs--;
+                            DHTs[i] = null;
+                        }
+                    }
+                }
+
             } catch (Exception e) {
                 System.out.println(e);
                 System.out.println("Exception: watcherMember");
@@ -229,6 +266,7 @@ public class ClusterManager implements Watcher {
     /* ---------------------Functions for management---------------------------------  */
 
     //Watcher for management events, los escribimos nosotros asi que no escuchamos
+    //Watcher for management events, los escribimos nosotros asi que no escuchamos
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------ClusterManager:Watcher for management------------------\n");
@@ -243,31 +281,40 @@ public class ClusterManager implements Watcher {
 
     //Asigna las tablas de la siguiente manera: si tenemos 3 tablas y replicacion 2 el primer servidor es el lider de la 0 y replica de 1 y 2.
     // el segundo lider de la 1 y replica de 2 y 0 y el tercero lider de 2 y replica de 1 y 2.
-    private TableAssigment assignTable(String member,int table){ //Number = number of the leader, table = id of table.
+    private TableAssigment assignTable(String member){ //member = para quien es el assignment
         int[] replicas = new int[replicationFactor];
         //Calculamos lo indicado antes.
-        if(table<Quorum){
-            int replica = table;
-            for(int i= 0; i < replicationFactor; i++){
-                if((replica+1)<Quorum){
-                    replica++;
-                    replicas[i]= replica;
-                }else{
-                    replica=0;
-                    replicas[i]= replica;
-                }
+
+        int table=0; //Buscamos la primera tabla sin nadie asignado
+        for(int i=0; i<DHTs.length; i++){
+            if(DHTs[i] == null){
+                table = i;
+                System.out.println("First empty table is "+i);
+                break;
             }
         }
+
+        int replica = table;
+        for(int i= 0; i < replicationFactor; i++){
+            if((replica+1)<Quorum){
+                replica++;
+                replicas[i]= replica;
+            }else{
+                replica=0;
+                replicas[i]= replica;
+            }
+        }
+
         TableAssigment assigment = new TableAssigment(table,replicas,member);
         System.out.println("Created table assigment with:");
         System.out.println("Leader: " + assigment.getTableLeader());
-        for (int replica: assigment.getTableReplicas()) {
-            System.out.println("Replica : " + replica);
+        for (int replicaServer: assigment.getTableReplicas()) {
+            System.out.println("Replica : " + replicaServer);
         }
         return assigment;
     }
     //Escribimos la asignacion
-    private void writeTableAssigment(TableAssigment assigment){
+    private int writeTableAssigment(TableAssigment assigment){
         byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
         if (zk != null) {
             try {
@@ -281,17 +328,18 @@ public class ClusterManager implements Watcher {
                     response = zk.create(rootManagement + tableAssignments +aTable, data,
                             ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
                     System.out.println(response);
+                    return assigment.getTableLeader();
                 } else {
                     System.out.println("Node table doesnt exists");
                 }
             } catch (KeeperException e) {
                 System.out.println("The session with Zookeeper failes. Closing");
                 System.out.println(e);
-                return;
             } catch (InterruptedException e) {
                 System.out.println("InterruptedException raised");
             }
         }
+        return 0;
     }
 
 
@@ -311,7 +359,6 @@ public class ClusterManager implements Watcher {
 
     }
 
-
     //Esto es para implementar la clase watcher(lo pide por algun motivo) y que no se nos mueran los procesos.
     @Override
     public void process(WatchedEvent event) {
@@ -324,7 +371,7 @@ public class ClusterManager implements Watcher {
 
 
     public static void main(String[] args) {
-        ClusterManager clusterManager = new ClusterManager(3,2);
+        ClusterManager clusterManager = new ClusterManager(3,2,null);
         clusterManager.init();
         System.out.println("Inited manager");
         try {
