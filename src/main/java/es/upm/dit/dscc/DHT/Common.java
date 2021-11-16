@@ -12,4 +12,7 @@ public class Common {
     public static String[] hosts = {"127.0.0.1:2181", "127.0.0.1:2181", "127.0.0.1:2181"};
     public static String aTable = "/table-";
     public static String tableAssignments = "/tableAssignmets";
+    public static String initBarrier = "/barrier";
+    public static String responses = "/responses";
+    public static String temporalAssignments = "/temporalAssignments";
 }

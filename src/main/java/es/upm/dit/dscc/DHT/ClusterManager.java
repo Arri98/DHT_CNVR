@@ -25,16 +25,21 @@ public class ClusterManager implements Watcher {
     private static String manager;
     private static String aTable;
     private static String tableAssignments;
+    private static String initBarrier;
+    private static String responses;
+    private static String temporalAssignments;
     Integer mutexBarrier = -1;
     private String myId;
     private static final int SESSION_TIMEOUT = 5000;
 
     private String[] DHTs;
+    private String[] temporalLeaders;
     private int numberOfDHTs = 0;
     private int replicationFactor;
 
     //Number of servers needed
-    private int Quorum; //TODO Definir esto
+    private int Quorum;
+    private boolean initedSystem;
 
     //Logger configuration TODO Configurar esto bien
     static Logger logger = Logger.getLogger(ClusterManager.class);
@@ -43,22 +48,29 @@ public class ClusterManager implements Watcher {
     boolean config_log4j = false;
 
 
-    ClusterManager(int Quorum,int replicationFactor,String[] DHTs){
-        Common c = new Common();
-        rootMembers = c.rootMembers;
-        rootOperations = c.rootOperations;
-        manager = c.manager;
-        rootManagement = c.rootManagement;
-        hosts = c.hosts;
-        aTable = c.aTable;
+    ClusterManager(int Quorum,int replicationFactor,String[] DHTs, String[] temporalLeaders){
+        rootMembers = Common.rootMembers;
+        rootOperations = Common.rootOperations;
+        manager = Common.manager;
+        rootManagement = Common.rootManagement;
+        hosts = Common.hosts;
+        aTable = Common.aTable;
+        initBarrier = Common.initBarrier;
+        responses = Common.responses;
+        temporalAssignments = Common.temporalAssignments;
         this.Quorum = Quorum;
         if(DHTs == null){
             this.DHTs = new String[Quorum];
         }else{
             this.DHTs = DHTs;
         }
+        if(temporalLeaders == null){
+            this.temporalLeaders = new String[Quorum];
+        }else{
+            this.temporalLeaders = temporalLeaders;
+        }
         this.replicationFactor = replicationFactor;
-        tableAssignments = c.tableAssignments;
+        tableAssignments = Common.tableAssignments;
 
     }
 
@@ -139,6 +151,32 @@ public class ClusterManager implements Watcher {
                     System.out.println(response);
                 }
 
+                // Create a node with the name tableAssingmets, if it is not created
+                s = zk.exists(rootManagement + initBarrier, null);
+                if (s == null) {
+                    // Created the znode, if it is not created.
+                    response = zk.create(rootManagement + initBarrier, new byte[0],
+                            Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    System.out.println(response);
+                }
+
+                // Create a node with the name tableAssingmets, if it is not created
+                s = zk.exists(rootOperations + responses, null);
+                if (s == null) {
+                    // Created the znode, if it is not created.
+                    response = zk.create(rootOperations + responses, new byte[0],
+                            Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    System.out.println(response);
+                }
+
+                // Create a node with the name tableAssingmets, if it is not created
+                s = zk.exists(rootManagement + temporalAssignments, null);
+                if (s == null) {
+                    // Created the znode, if it is not created.
+                    response = zk.create(rootManagement + temporalAssignments, new byte[0],
+                            Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    System.out.println(response);
+                }
 
                 // Create a znode for registering as member and get my id
                 myId = zk.create(rootMembers + manager, new byte[0],
@@ -184,7 +222,7 @@ public class ClusterManager implements Watcher {
      */
 
 
-    private Watcher  membersWatcher = new Watcher() {
+    private Watcher membersWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------ClusterManager:Watcher for  members------------------\n");
             try {
@@ -219,7 +257,12 @@ public class ClusterManager implements Watcher {
                     System.out.println("ManagerWatcher id down, we should create a new one");
                 }
 
-                if(numberOfDHTs>=Quorum){
+                if(!initedSystem && numberOfDHTs == Quorum){
+                    initedSystem = true;
+                    zk.delete(rootManagement + initBarrier,0);
+                    System.out.println("Quorum reached");
+                }
+                else if(numberOfDHTs>=Quorum){
                     System.out.println("No more servers needed");
                 }
                 //Miramos si se ha caido algun nodo de los de la DHT
@@ -233,9 +276,18 @@ public class ClusterManager implements Watcher {
                             }
                         }
                         if(!exists){
-                            System.out.println("Node "+ DHTs[i] + " has failed");
+                            System.out.println("Node "+ DHTs[i] + " has failed. Looking for leader for table " + i);
                             numberOfDHTs--;
-                            DHTs[i] = null;
+                            String copyDHT = DHTs[i]; //Guardamos la copia para buscar si era lider temporal
+                            DHTs[i] = null; //Hay que borrarlo para que asigne bien los temporales
+                            assignTemporalLeader(i);
+                            for(int j =0; j<temporalLeaders.length; j++){
+                                if(copyDHT.equals(temporalLeaders[j])){
+                                    System.out.println("Node " + copyDHT + " was also temporal leader of table " + j);
+                                    System.out.println("Looking for new leader");
+                                    assignTemporalLeader(j);
+                                }
+                            }
                         }
                     }
                 }
@@ -266,7 +318,6 @@ public class ClusterManager implements Watcher {
     /* ---------------------Functions for management---------------------------------  */
 
     //Watcher for management events, los escribimos nosotros asi que no escuchamos
-    //Watcher for management events, los escribimos nosotros asi que no escuchamos
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------ClusterManager:Watcher for management------------------\n");
@@ -278,6 +329,7 @@ public class ClusterManager implements Watcher {
             }
         }
     };
+
 
     //Asigna las tablas de la siguiente manera: si tenemos 3 tablas y replicacion 2 el primer servidor es el lider de la 0 y replica de 1 y 2.
     // el segundo lider de la 1 y replica de 2 y 0 y el tercero lider de 2 y replica de 1 y 2.
@@ -313,6 +365,7 @@ public class ClusterManager implements Watcher {
         }
         return assigment;
     }
+
     //Escribimos la asignacion
     private int writeTableAssigment(TableAssigment assigment){
         byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
@@ -341,6 +394,64 @@ public class ClusterManager implements Watcher {
         }
         return 0;
     }
+
+    //Escribimos la asignacion
+    private int writeTemporalTableAssigment(TableTemporalAssignment assigment){
+        byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
+        if (zk != null) {
+            try {
+                // Si el nodo management existe añadimos un hijo con nuestra operacion
+                String response = new String();
+                Stat s = zk.exists(rootManagement + temporalAssignments , managementWatcher);
+                if (s != null) {
+                    // Created the znode, if it is not created.
+                    System.out.println("Creating assignment node");
+                    zk.getChildren(rootManagement + tableAssignments, null, s);
+                    response = zk.create(rootManagement + temporalAssignments +aTable, data,
+                            ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
+                    System.out.println(response);
+                    return assigment.getTableLeader();
+                } else {
+                    System.out.println("Node temporal table doesnt exists");
+                }
+            } catch (KeeperException e) {
+                System.out.println("The session with Zookeeper failes. Closing");
+                System.out.println(e);
+            } catch (InterruptedException e) {
+                System.out.println("InterruptedException raised");
+            }
+        }
+        return 0;
+    }
+
+    private void assignTemporalLeader(int i) {
+        int position = i;
+        Boolean replicaFound = false;
+        for(int j= 0; j < replicationFactor; j++){
+            position++;
+            if((position)>=Quorum){
+                position = 0;
+            }
+            if(DHTs[position] != null){
+                temporalLeaders[i] = DHTs[position];
+                System.out.println("Temporal leader is: " + DHTs[position]);
+                replicaFound = true;
+                break;
+            } else{
+                System.out.println("Replica "+ (j+1) + " is down, looking for next one");
+            }
+
+        }
+        if(replicaFound){
+            TableTemporalAssignment assigment = new TableTemporalAssignment(i,DHTs[position]);
+            writeTemporalTableAssigment(assigment);
+        }else{
+            System.out.println("Replica for could not be found. Table " + i + " lost");
+        }
+
+    }
+
+
 
 
     /* ---------------------Main and common functions functions ---------------------------------  */
@@ -371,7 +482,7 @@ public class ClusterManager implements Watcher {
 
 
     public static void main(String[] args) {
-        ClusterManager clusterManager = new ClusterManager(3,2,null);
+        ClusterManager clusterManager = new ClusterManager(3,2,null,null);
         clusterManager.init();
         System.out.println("Inited manager");
         try {

@@ -5,9 +5,12 @@ import org.apache.commons.lang.SerializationUtils;
 import org.apache.zookeeper.*;
 import org.apache.zookeeper.data.Stat;
 
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+
+
 
 
 //La clase de DHT
@@ -15,29 +18,41 @@ public class DHT implements Watcher{
 
     String[] hosts;
     private ZooKeeper zk;
+    //Strings de rutas
     private static String rootMembers;
     private static String rootManagement;
     private static String rootOperations ;
     private static String aMember;
     private static String aOperation;
     private static String tableAssignments;
+    private static String responses;
+
+    //Ultima operacion escuchada para no repetir
+    private int lastOperation=-1; //Ultima operacion escuchada, por si me llegan repetidas antes de que alguien borre.
+    private List<String> myPetitions =  new ArrayList(); //Peticiones que he hecho de las que espero respuesta
+
     private TableManager tableManager; //El manager encargado de devolver la tabla correspondiente a una clave
     private String localAdress; //La direccion local de la tabla
     Integer mutexBarrier = -1;
     private static final int SESSION_TIMEOUT = 5000;
     private String myId;
-    private int leaderOfTable;
+    private int leaderOfTable; //De que tabla contesto gets
+    private int[] temporalLeaderOfTables; //Tablas de las que soy lider pero no deberia
+    private boolean imTemporalLeader = false; //Si soy lider temporal para escuchar el resto de asignaciones
     private int[] myReplicas;
+    private static String initBarrier;
+    private boolean listenPetitions = false; //Si se ha llegado al quorum empiezo a contestar.
 
-    DHT(int DHTnumber){
-        Common c = new Common();
-        rootMembers = c.rootMembers;
-        rootOperations = c.rootOperations;
-        aMember = c.aMember;
-        rootManagement = c.rootManagement;
-        hosts = c.hosts;
-        aOperation = c.aOperation;
-        tableAssignments = c.tableAssignments;
+    DHT(){
+        rootMembers = Common.rootMembers;
+        rootOperations = Common.rootOperations;
+        aMember = Common.aMember;
+        rootManagement = Common.rootManagement;
+        hosts = Common.hosts;
+        aOperation = Common.aOperation;
+        tableAssignments = Common.tableAssignments;
+        initBarrier = Common.initBarrier;
+        responses = Common.responses;
     }
 
     /* ---------------------Initialization ---------------------------------  */
@@ -73,10 +88,11 @@ public class DHT implements Watcher{
 
 
                 List<String> l= zk.getChildren(rootManagement, managementWatcher);
+                zk.getChildren(rootOperations, operationsWatcher);
+                zk.getChildren(rootOperations+responses, responseWatcher);
                 l = zk.getChildren(rootManagement + tableAssignments, tableWatcher);
-                l = zk.getChildren(rootOperations, operationsWatcher);
-
                 myId = myId.replace(rootMembers + "/", "");
+                processAssignments(l);
                 System.out.println("I am: "+myId);
             } catch (KeeperException e) {
                 System.out.println("The session with Zookeeper failes. Closing");
@@ -114,7 +130,8 @@ public class DHT implements Watcher{
                 List<String> list = zk.getChildren(rootManagement+ tableAssignments ,  tableWatcher);
                 processAssignments(list);
             } catch (Exception e) {
-                System.out.println("Exception: managementWatcher");
+                System.out.println(e);
+                System.out.println("Exception: tableWatcher");
             }
         }
     };
@@ -128,6 +145,17 @@ public class DHT implements Watcher{
             System.out.println("------------------DHT:Watcher for management------------------\n");
             try {
                 List<String> list = zk.getChildren(rootManagement,  managementWatcher);
+                boolean barrierUp = false;
+                for (Iterator<String> iterator = list.iterator(); iterator.hasNext();) {
+                    String member = iterator.next();
+                    if(member.equals(initBarrier)){
+                        barrierUp = true;
+                    }
+                }
+                if(!barrierUp){
+                    System.out.println("Quorum reached, listening petitions now");
+                    listenPetitions = true;
+                }
             } catch (Exception e) {
                 System.out.println("Exception: managementWatcher");
             }
@@ -147,6 +175,7 @@ public class DHT implements Watcher{
                 leaderOfTable = assigment.getTableLeader(); //Soy el lider de la tabla
                 System.out.print("And replica for tables: ");
                 myReplicas = assigment.getTableReplicas(); //Mis replicas son
+                temporalLeaderOfTables = new int[myReplicas.length];
                 for(int i=0; i<assigment.getTableReplicas().length; i++) {
                     System.out.print(assigment.getTableReplicas()[i]+ " ");
                 }
@@ -165,21 +194,42 @@ public class DHT implements Watcher{
         Stat stat = new Stat();
         for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
             String string = (String) iterator.next();
-            System.out.println(string);
-            byte[] data = zk.getData(rootOperations +"/"+ string, null, stat); //Leemos el nodo
-            DHTPetition oper = (DHTPetition) SerializationUtils.deserialize(data); //byte -> Order
-            System.out.print("\nOperation " + oper.getOperation().toString());
-            System.out.print("\nOperation " + oper.getGUID());
-            if(Integer.parseInt(oper.getGUID()) == leaderOfTable ){ //Si la peticion va para la tabla de la que soy lider
-                System.out.println("I am the leader of the table and should listen to operation");
-            }else if(ArrayUtils.contains(myReplicas,Integer.parseInt(oper.getGUID()))){ //Si somos replica de la tabla
-                if(oper.getOperation() == OperationEnum.PUT_MAP){
-                    System.out.println("I am replica and should execute put");
-                } else if(oper.getOperation() == OperationEnum.GET_MAP){
-                    System.out.println("I am replica and should not execute get");
-                } else if(oper.getOperation() == OperationEnum.REMOVE_MAP){
-                    System.out.println("I am replica and should execute remove");
+            if(!string.equals("responses")){
+                System.out.println(string);
+                String editedString = string.replace("operation-","");
+                int operationNumber = Integer.parseInt(editedString);
+                System.out.println(operationNumber);
+                int maxNewOperation = -1;
+                if(operationNumber>lastOperation){
+                    if(operationNumber>maxNewOperation){
+                        maxNewOperation = operationNumber;
+                    }
+                    lastOperation=operationNumber;
+                    byte[] data = zk.getData(rootOperations +"/"+ string, null, stat); //Leemos el nodo
+                    DHTPetition oper = (DHTPetition) SerializationUtils.deserialize(data); //byte -> Order
+                    System.out.print("\nOperation " + oper.getOperation().toString());
+                    System.out.print("\nOperation " + oper.getGUID());
+
+                    if(Integer.parseInt(oper.getGUID()) == leaderOfTable ){ //Si la peticion va para la tabla de la que soy lider
+                        System.out.println("I am the leader of the table and should listen to operation");
+
+                        DHTResponse response = new DHTResponse("a",new DHT_Map("a",2));
+                        sendResponse(response,string);
+                    }else if(ArrayUtils.contains(myReplicas,Integer.parseInt(oper.getGUID()))){ //Si somos replica de la tabla
+                        if(oper.getOperation() == OperationEnum.PUT_MAP){
+                            System.out.println("I am replica and should execute put");
+                        } else if(oper.getOperation() == OperationEnum.GET_MAP){
+                            System.out.println("I am replica and should not execute get");
+                        } else if(oper.getOperation() == OperationEnum.REMOVE_MAP){
+                            System.out.println("I am replica and should execute remove");
+                        }
+                    }
+                    lastOperation = maxNewOperation;
+                }else{
+                    System.out.println("Operation "+string+" already listened");
                 }
+
+
             }
         }
         System.out.println();
@@ -196,7 +246,34 @@ public class DHT implements Watcher{
                 List<String> list = zk.getChildren(rootOperations,  operationsWatcher); //Coje la lista de nodos
                 printOperations(list); //Imprime cada uno
             } catch (Exception e) {
+                System.out.println(e);
                 System.out.println("Exception: operationsWatcher");
+            }
+        }
+    };
+
+    //Cuando se añaden responses a operations
+    private Watcher responseWatcher = new Watcher() {
+        public void process(WatchedEvent event) {
+            System.out.println("------------------Watcher for responses------------------\n");
+            System.out.println("------------------"+myId+"------------------\n");
+
+            try {
+                List<String> list = zk.getChildren(rootOperations + responses,  responseWatcher); //Coje la lista de nodos
+                for (Iterator<String> iterator = list.iterator(); iterator.hasNext();){
+                    String response = iterator.next();
+                    if(myPetitions.contains(response)){
+                        Stat s = new Stat();
+                        byte[] data = zk.getData(rootOperations + responses+"/"+response,null,s);
+                        DHTResponse dhtResponse = (DHTResponse) SerializationUtils.deserialize(data); //byte -> Response
+                        System.out.println("Response for petition "+response+ "is "+ dhtResponse.getMap().getValue() );
+                        myPetitions.remove(response);
+                        zk.delete(rootOperations + responses +"/"+ response,s.getVersion());
+                    }
+                }
+            } catch (Exception e) {
+                System.out.println(e);
+                System.out.println("Exception: responseWatcher");
             }
         }
     };
@@ -216,9 +293,42 @@ public class DHT implements Watcher{
                     List<String> list = zk.getChildren(rootOperations, null, s);
                     response = zk.create(rootOperations+aOperation, data,
                             ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
+                    String petitionId = response.replace(rootOperations + "/", "");
+                    System.out.println(petitionId);
+                    myPetitions.add(petitionId);
                     System.out.println(response);
                 }else{
                     System.out.println("Node operations doesn't exists");
+                }
+            } catch (KeeperException e) {
+                System.out.println("The session with Zookeeper failes. Closing");
+                System.out.println(e);
+                return;
+            } catch (InterruptedException e) {
+                System.out.println("InterruptedException raised");
+            }
+
+        }
+    }
+
+
+    //Escribe un nodo con una operacion
+    public void sendResponse(DHTResponse res,String operation){
+        byte[] data = SerializationUtils.serialize(res); //Response -> byte[]
+
+        if (zk != null) {
+            try {
+                // Si el nodo operacion existe añadimos un hijo con nuestra operacion
+                String response = new String();
+                Stat s = zk.exists(rootOperations+responses, null);
+                if (s != null) {
+                    // Created the znode, if it is not created.
+                    List<String> list = zk.getChildren(rootOperations, null, s);
+                    response = zk.create(rootOperations+responses+"/"+operation, data,
+                            ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL); //Nodo  efimero
+                    System.out.println(response);
+                }else{
+                    System.out.println("Node responses doesn't exists");
                 }
             } catch (KeeperException e) {
                 System.out.println("The session with Zookeeper failes. Closing");
@@ -245,11 +355,12 @@ public class DHT implements Watcher{
     }
 
 
-    public static void main(String[] args) {
-        DHT dht1 = new DHT(1);
+    public static void main(String[] args) throws InterruptedException {
+        DHT dht1 = new DHT();
         System.out.println("New DHT");
         dht1.init();
         System.out.println("Inited");
+        Thread.sleep(2000);
         dht1.sendOperation(OperationEnum.PUT_MAP,"1",new DHT_Map("a",2));
         System.out.println("Operation sended");
 
