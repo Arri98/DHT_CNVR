@@ -7,6 +7,9 @@ import org.apache.zookeeper.data.Stat;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 //La clase de DHT
 public class DHT implements Watcher{
@@ -28,7 +31,6 @@ public class DHT implements Watcher{
     //Ultima operacion escuchada para no repetir
     private int lastOperation=-1; //Ultima operacion escuchada, por si me llegan repetidas antes de que alguien borre.
     private List<String> myPetitions =  new ArrayList(); //Peticiones que he hecho de las que espero respuesta
-    private TableManager tableManager; //El manager encargado de devolver la tabla correspondiente a una clave
     private String localAdress; //La direccion local de la tabla
     Integer mutexBarrier = -1;
     private static final int SESSION_TIMEOUT = 5000;
@@ -39,6 +41,8 @@ public class DHT implements Watcher{
     private boolean listenPetitions = false; //Si se ha llegado al quorum empiezo a contestar.
     private int Quorum;
     private HashMap<Integer, DHTUserInterface> DHTTables = new HashMap<Integer, DHTUserInterface>();
+    //Logger configuration
+    private static final Logger LOGGER = Logger.getLogger(DHT.class.getName());
 
     DHT(){
         rootMembers = Common.rootMembers;
@@ -100,10 +104,10 @@ public class DHT implements Watcher{
                 processAssignments(l);
                 System.out.println("I am: "+myId);
             } catch (KeeperException e) {
-                System.out.println("The session with Zookeeper failes. Closing");
+                LOGGER.severe("The session with Zookeeper failes. Closing");
                 return;
             } catch (InterruptedException e) {
-                System.out.println("InterruptedException raised");
+                LOGGER.severe("InterruptedException raised");
             }
 
         }
@@ -117,8 +121,8 @@ public class DHT implements Watcher{
      */
     private Watcher cWatcher = new Watcher() {
         public void process (WatchedEvent e) {
-            System.out.println("Created session");
-            System.out.println(e.toString());
+            LOGGER.info("Created session");
+            LOGGER.fine(e.toString());
             synchronized (mutexBarrier) {
                 mutexBarrier.notify();
             }
@@ -130,13 +134,13 @@ public class DHT implements Watcher{
     //Watcher for table assignment events
     private Watcher tableWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------DHT:Watcher for table assignments------------------\n");
+            LOGGER.info("------------------DHT:Watcher for table assignments------------------\n");
             try {
                 List<String> list = zk.getChildren(rootManagement+ tableAssignments ,  tableWatcher);
                 processAssignments(list);
             } catch (Exception e) {
-                System.out.println(e);
-                System.out.println("Exception: tableWatcher");
+                LOGGER.warning(e.toString());
+                LOGGER.warning("Exception: tableWatcher");
             }
         }
     };
@@ -147,7 +151,7 @@ public class DHT implements Watcher{
     //Watcher for management events
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------DHT:Watcher for management------------------\n");
+            LOGGER.info("------------------DHT:Watcher for management------------------\n");
             try {
                 List<String> list = zk.getChildren(rootManagement,  managementWatcher);
                 boolean barrierUp = false;
@@ -158,11 +162,11 @@ public class DHT implements Watcher{
                     }
                 }
                 if(!barrierUp){
-                    System.out.println("Quorum reached, listening petitions now");
+                    LOGGER.info("Quorum reached, listening petitions now");
                     listenPetitions = true;
                 }
             } catch (Exception e) {
-                System.out.println("Exception: managementWatcher");
+                LOGGER.warning("Exception: managementWatcher");
             }
         }
     };
@@ -175,24 +179,24 @@ public class DHT implements Watcher{
             byte[] data = zk.getData(rootManagement+tableAssignments+"/"+ string, null, s); //Leemos el nodo
             TableAssigment assigment = (TableAssigment) SerializationUtils.deserialize(data); //byte -> Order
             if(assigment.getDHTId().equals(myId)){ //Si hay alguna peticion para mi
-                System.out.println("Assignment for me: "+ myId);
-                System.out.println("I am leader for table:"+ assigment.getTableLeader());
+                LOGGER.info("Assignment for me: "+ myId);
+                LOGGER.info("I am leader for table:"+ assigment.getTableLeader());
                 leaderOfTable = assigment.getTableLeader(); //Soy el lider de la tabla
-                System.out.print("And replica for tables: ");
+                LOGGER.info("And replica for tables: ");
                 myReplicas = assigment.getTableReplicas(); //Mis replicas son
                 temporalLeaderOfTables = new boolean[Quorum];
                 for(int i=0; i<assigment.getTableReplicas().length; i++) {
-                    System.out.print(assigment.getTableReplicas()[i]+ " ");
+                    LOGGER.info(assigment.getTableReplicas()[i]+ " ");
                 }
-                System.out.println("\n");
+                LOGGER.info("\n");
                 zk.delete(rootManagement+tableAssignments+"/"+ string,s.getVersion());
             }else if(temporalLeaderOfTables[assigment.getTableLeader()]){
-                System.out.println("There is a new leader for table : "+ assigment.getTableLeader());
-                System.out.println("My temporal work here is done");
+                LOGGER.info("There is a new leader for table : "+ assigment.getTableLeader());
+                LOGGER.info("My temporal work here is done");
                 temporalLeaderOfTables[assigment.getTableLeader()] = false;
             }
             else{
-                System.out.println("I am "+ myId + " and this is for " + assigment.getDHTId() );
+                LOGGER.info("I am "+ myId + " and this is for " + assigment.getDHTId() );
             }
         }
     }
@@ -200,7 +204,7 @@ public class DHT implements Watcher{
     //Watcher for table assignment events
     private Watcher temportalAssignmentWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------DHT:Watcher for temporal table assignments------------------\n");
+            LOGGER.info("------------------DHT:Watcher for temporal table assignments------------------\n");
             try {
                 List<String> list = zk.getChildren(rootManagement+ temporalAssignments ,  temportalAssignmentWatcher);
                 Stat s = new Stat();
@@ -209,18 +213,18 @@ public class DHT implements Watcher{
                     byte[] data = zk.getData(rootManagement+ temporalAssignments+"/"+ string, null, s); //Leemos el nodo
                     TableTemporalAssignment assigment = (TableTemporalAssignment) SerializationUtils.deserialize(data); //byte -> Order
                     if(assigment.getDHTId().equals(myId)){ //Si hay alguna peticion para mi
-                        System.out.println("Temporal ssignment for me: "+ myId);
-                        System.out.println("I am temporal leader for table:"+ assigment.getTableLeader());
+                        LOGGER.info("Temporal ssignment for me: "+ myId);
+                        LOGGER.info("I am temporal leader for table:"+ assigment.getTableLeader());
                         temporalLeaderOfTables[ assigment.getTableLeader()] = true;
-                        System.out.println("\n");
+                        LOGGER.info("\n");
                         zk.delete(rootManagement+ temporalAssignments+"/"+ string,s.getVersion());
                     }else{
-                        System.out.println("I am "+ myId + " and this temporal assignment is for " + assigment.getDHTId() );
+                        LOGGER.info("I am "+ myId + " and this temporal assignment is for " + assigment.getDHTId() );
                     }
                 }
             } catch (Exception e) {
-                System.out.println(e);
-                System.out.println("Exception: tableWatcher");
+                LOGGER.warning(e.toString());
+                LOGGER.warning("Exception: tableWatcher");
             }
         }
     };
@@ -235,10 +239,10 @@ public class DHT implements Watcher{
         for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
             String string = (String) iterator.next();
             if(!string.equals("responses")){
-                System.out.println(string);
+                LOGGER.fine(string);
                 String editedString = string.replace("operation-","");
                 int operationNumber = Integer.parseInt(editedString);
-                System.out.println(operationNumber);
+                LOGGER.fine(String.valueOf(operationNumber));
                 int maxNewOperation = -1;
                 if(operationNumber>lastOperation){
                     if(operationNumber>maxNewOperation){
@@ -247,52 +251,49 @@ public class DHT implements Watcher{
                     lastOperation=operationNumber;
                     byte[] data = zk.getData(rootOperations +"/"+ string, null, stat); //Leemos el nodo
                     DHTPetition oper = (DHTPetition) SerializationUtils.deserialize(data); //byte -> Order
-                    System.out.print("\nOperation " + oper.getOperation().toString());
-                    System.out.print("\nOperation " + oper.getTableId());
+                    LOGGER.fine("\nOperation " + oper.getOperation().toString());
+                    LOGGER.fine("\nOperation " + oper.getTableId());
 
                     if(oper.getTableId()== leaderOfTable ){ //Si la peticion va para la tabla de la que soy lider
-                        System.out.println("I am the leader of the table and should listen to operation");
+                        LOGGER.info("I am the leader of the table and should listen to operation");
                         leaderAnswer(oper,string);
 
                     }else if(temporalLeaderOfTables[oper.getTableId()]){
-                        System.out.println("I am the temporal leader of the table and should listen to operation");
+                        LOGGER.info("I am the temporal leader of the table and should listen to operation");
                         leaderAnswer(oper,string);
                     }
                     else if(ArrayUtils.contains(myReplicas,oper.getTableId())){ //Si somos replica de la tabla
                         if(oper.getOperation() == OperationEnum.PUT_MAP){
-                            System.out.println("I am replica and should execute put");
-                            putOperation(oper.getMap().getKey(),oper.getMap().getValue(),false);
+                            LOGGER.info("I am replica and should execute put");
+                            getDHT(oper.getMap().getKey()).put(oper.getMap());
                         } else if(oper.getOperation() == OperationEnum.GET_MAP){
-                            System.out.println("I am replica and should not execute get");
+                            LOGGER.info("I am replica and should not execute get");
                         } else if(oper.getOperation() == OperationEnum.REMOVE_MAP){
-                            System.out.println("I am replica and should execute remove");
-                            removeOperation(oper.getMap().getKey(),false);
+                            LOGGER.info("I am replica and should execute remove");
+                            getDHT(oper.getMap().getKey()).remove(oper.getMap().getKey());
                         }
                     }
                     lastOperation = maxNewOperation;
                 }else{
-                    System.out.println("Operation "+string+" already listened");
+                    LOGGER.info("Operation "+string+" already listened");
                 }
 
 
             }
         }
-        System.out.println();
     }
 
 
     //Cuando se añaden operaciones a operations
     private Watcher operationsWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------Watcher for operations------------------\n");
-            System.out.println("------------------"+myId+"------------------\n");
-
+            LOGGER.info("------------------Watcher for operations------------------\n");
             try {
                 List<String> list = zk.getChildren(rootOperations,  operationsWatcher); //Coje la lista de nodos
                 printOperations(list); //Imprime cada uno
             } catch (Exception e) {
-                System.out.println(e);
-                System.out.println("Exception: operationsWatcher");
+                LOGGER.warning(e.toString());
+                LOGGER.warning("Exception: operationsWatcher");
             }
         }
     };
@@ -300,9 +301,7 @@ public class DHT implements Watcher{
     //Cuando se añaden responses a operations
     private Watcher responseWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------Watcher for responses------------------\n");
-            System.out.println("------------------"+myId+"------------------\n");
-
+            LOGGER.info("------------------Watcher for responses------------------\n");
             try {
                 List<String> list = zk.getChildren(rootOperations + responses,  responseWatcher); //Coje la lista de nodos
                 for (Iterator<String> iterator = list.iterator(); iterator.hasNext();){
@@ -312,10 +311,10 @@ public class DHT implements Watcher{
                         byte[] data = zk.getData(rootOperations + responses+"/"+response,null,s);
                         DHTResponse dhtResponse = (DHTResponse) SerializationUtils.deserialize(data); //byte -> Response
                         if(dhtResponse.getMap() != null){
-                            System.out.println("Response for petition "+response+ "is "+ dhtResponse.getMap().getValue() );
-                            System.out.println(dhtResponse.getMap().getValue());
+                            LOGGER.info("Response for petition "+response+ "is "+ dhtResponse.getMap().getValue() );
+                            LOGGER.warning(String.valueOf(dhtResponse.getMap().getValue()));
                         }else{
-                            System.out.println("Emptry response for petition "+response);
+                            LOGGER.info("Emptry response for petition "+response);
                         }
 
                         myPetitions.remove(response);
@@ -323,8 +322,8 @@ public class DHT implements Watcher{
                     }
                 }
             } catch (Exception e) {
-                System.out.println(e);
-                System.out.println("Exception: responseWatcher");
+                LOGGER.warning(e.toString());
+                LOGGER.warning("Exception: responseWatcher");
             }
         }
     };
@@ -345,18 +344,18 @@ public class DHT implements Watcher{
                     response = zk.create(rootOperations+aOperation, data,
                             ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
                     String petitionId = response.replace(rootOperations + "/", "");
-                    System.out.println(petitionId);
+                    LOGGER.fine(petitionId);
                     myPetitions.add(petitionId);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }else{
-                    System.out.println("Node operations doesn't exists");
+                    LOGGER.warning("Node operations doesn't exists");
                 }
             } catch (KeeperException e) {
-                System.out.println("The session with Zookeeper failes. Closing");
-                System.out.println(e);
+                LOGGER.severe("The session with Zookeeper failes. Closing");
+                LOGGER.warning(e.toString());
                 return;
             } catch (InterruptedException e) {
-                System.out.println("InterruptedException raised");
+                LOGGER.warning("InterruptedException raised");
             }
 
         }
@@ -369,13 +368,13 @@ public class DHT implements Watcher{
                 sendResponse(new DHTResponse(getPos(petition.getMap().getKey()),map),operation);
                 break;
             case PUT_MAP:
-                putOperation(petition.getMap().getKey(), petition.getMap().getValue(),false);
+                getDHT(petition.getMap().getKey()).put(petition.getMap());
                 break;
             case REMOVE_MAP:
                 removeOperation(petition.getMap().getKey(),false);
                 break;
             default:
-                System.out.println("Wrong operation");
+                LOGGER.warning("Wrong operation");
         }
     }
 
@@ -393,16 +392,16 @@ public class DHT implements Watcher{
                     List<String> list = zk.getChildren(rootOperations, null, s);
                     response = zk.create(rootOperations+responses+"/"+operation, data,
                             ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL); //Nodo  efimero
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }else{
-                    System.out.println("Node responses doesn't exists");
+                    LOGGER.info("Node responses doesn't exists");
                 }
             } catch (KeeperException e) {
-                System.out.println("The session with Zookeeper failes. Closing");
-                System.out.println(e);
+                LOGGER.severe("The session with Zookeeper failes. Closing");
+                LOGGER.warning(e.toString());
                 return;
             } catch (InterruptedException e) {
-                System.out.println("InterruptedException raised");
+                LOGGER.warning("InterruptedException raised");
             }
 
         }
@@ -413,7 +412,7 @@ public class DHT implements Watcher{
 
         int hash =	key.hashCode();
         if (hash < 0) {
-            System.out.println("Hash value is negative!!!!!");
+            LOGGER.warning("Hash value is negative!!!!!");
             hash = -hash;
         }
 
@@ -425,7 +424,7 @@ public class DHT implements Watcher{
             }
         }
 
-        System.out.println("getPos: This sentence shound not run");
+        LOGGER.warning("getPos: This sentence shound not run");
         return 1;
 
     }
@@ -436,36 +435,27 @@ public class DHT implements Watcher{
         return DHTTables.get(getPos(key));
     }
 
-    private ScannerAnswer putOperation(String key, int value,boolean broadcast){
+    private ScannerAnswer putOperation(String key, int value){
         int position = getPos(key);
-        if(isLocalTable(position)){
-            System.out.println("Local operation");
-                getDHT(key).put(new DHT_Map(key, value));
-                if(broadcast) {
-                    sendOperation(OperationEnum.PUT_MAP, position, new DHT_Map(key, value));
-                }
-                return new ScannerAnswer(ScannerAnswerEnum.ANSWER,null);
-        }else {
-            System.out.println("Getting  answer");
+            LOGGER.info("Getting  answer");
             sendOperation(OperationEnum.PUT_MAP,position,new DHT_Map(key,value));
             return new ScannerAnswer(ScannerAnswerEnum.EXTERNAL_PETITION,null);
-        }
     }
 
     private ScannerAnswer getOperation(String key){
         int position = getPos(key);
         if(isLocalTable(position)){
-            System.out.println("Local operation");
+            LOGGER.info("Local operation");
             if(getDHT(key).containsKey(key)) {
-                System.out.println("Getting key  "+key);
+                LOGGER.info("Getting key  "+key);
                 getDHT(key).get(key);
                 return new ScannerAnswer(ScannerAnswerEnum.ANSWER,new DHT_Map(key,getDHT(key).get(key)));
             }else{
-                System.out.println("Key does not exist");
+                LOGGER.info("Key does not exist");
                 return new ScannerAnswer(ScannerAnswerEnum.NO_KEY,null);
             }
         }else {
-            System.out.println("Getting  answer");
+            LOGGER.info("Getting  answer");
             sendOperation(OperationEnum.GET_MAP,position,new DHT_Map(key,0));
             return new ScannerAnswer(ScannerAnswerEnum.EXTERNAL_PETITION,null);
         }
@@ -474,20 +464,20 @@ public class DHT implements Watcher{
     private ScannerAnswer removeOperation(String key,boolean broadcast){
         int position = getPos(key);
         if(isLocalTable(position)){
-            System.out.println("Local operation");
+            LOGGER.info("Local operation");
             if(getDHT(key).containsKey(key)) {
-                System.out.println("Removed key "+key);
+                LOGGER.info("Removed key "+key);
                 getDHT(key).remove(key);
                 if(broadcast){
                     sendOperation(OperationEnum.REMOVE_MAP,position,new DHT_Map(key,0));
                 }
                 return new ScannerAnswer(ScannerAnswerEnum.ANSWER,null);
             }else{
-                System.out.println("Got asked to remove non existing local key: "+key);
+                LOGGER.info("Got asked to remove non existing local key: "+key);
                 return new ScannerAnswer(ScannerAnswerEnum.NO_KEY,null);
             }
         }else {
-            System.out.println("Getting  answer");
+            LOGGER.info("Getting  answer");
             sendOperation(OperationEnum.REMOVE_MAP,position,new DHT_Map(key,0));
             return new ScannerAnswer(ScannerAnswerEnum.EXTERNAL_PETITION,null);
         }
@@ -511,14 +501,16 @@ public class DHT implements Watcher{
     @Override
     public void process(WatchedEvent event) {
         try {
-            System.out.println("Unexpected invocated this method. Process of the object");
+            LOGGER.warning("Unexpected invocated this method. Process of the object");
         } catch (Exception e) {
-            System.out.println("Unexpected exception. Process of the object");
+            LOGGER.warning("Unexpected exception. Process of the object");
         }
     }
 
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
+        System.setProperty("java.util.logging.SimpleFormatter.format", "%5$s %n");
+        LOGGER.setLevel(Level.FINE);
         DHT dht1 = new DHT();
         System.out.println("New DHT");
         dht1.init();
@@ -557,7 +549,7 @@ public class DHT implements Watcher{
                         System. out .print(">>> Enter account number (int) = ");
                         if (sc.hasNextInt()) {
                             value = sc.nextInt();
-                            dht1.putOperation(key,value,true);
+                            dht1.putOperation(key,value);
                         } else {
                             System.out.println("The provised text provided is not an integer");
                             sc.next();
@@ -605,8 +597,6 @@ public class DHT implements Watcher{
 
         }
         sc.close();
-
-
     }
 
 

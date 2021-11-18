@@ -1,10 +1,8 @@
 package es.upm.dit.dscc.DHT;
 
 import org.apache.commons.lang.SerializationUtils;
-import org.apache.log4j.Level;
-import org.apache.log4j.PropertyConfigurator;
 
-import org.apache.log4j.Logger;
+
 import org.apache.zookeeper.*;
 import org.apache.zookeeper.data.Stat;
 import org.apache.zookeeper.ZooDefs.Ids;
@@ -13,6 +11,9 @@ import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 
 public class ClusterManager implements Watcher {
@@ -43,11 +44,9 @@ public class ClusterManager implements Watcher {
     private int Quorum;
     private boolean initedSystem;
 
-    //Logger configuration TODO Configurar esto bien
-    static Logger logger = Logger.getLogger(ClusterManager.class);
-    String userDirectory = System.getProperty("user.dir");
-    String log4jConfPath = userDirectory + "/src/main/java/es/upm/dit/dscc/DHT/log4j.properties";
-    boolean config_log4j = false;
+    //Logger configuration
+    private static final Logger LOGGER = Logger.getLogger(ClusterManager.class.getName());
+
 
 
     ClusterManager(int Quorum,int replicationFactor,String[] DHTs, String[] temporalLeaders){
@@ -80,18 +79,6 @@ public class ClusterManager implements Watcher {
     /* ---------------------Initialization ---------------------------------  */
 
     public void init(){
-        //Log4j config
-        if (config_log4j) {
-            try {
-                System.out.println(log4jConfPath);
-                // Configure Logger
-                //BasicConfigurator.configure();
-                PropertyConfigurator.configure(log4jConfPath);
-                logger.setLevel(Level.TRACE);//(Level.INFO);
-            } catch (Exception E){
-                System.out.println("The path of log4j.properties is not correct");
-            }
-        }
         // Select a random zookeeper server
         Random rand = new Random();
         int i = rand.nextInt(hosts.length);
@@ -106,11 +93,11 @@ public class ClusterManager implements Watcher {
                     }
                     //zk.exists("/",false);
                 } catch (Exception e) {
-                    System.out.println("Exception in the wait while creating the session");
+                    LOGGER.severe("Exception in the wait while creating the session");
                 }
             }
         } catch (Exception e) {
-            System.out.println("Exception while creating the session");
+            LOGGER.severe("Exception while creating the session");
         }
 
         // Create zookeeper session if it doesn't exist
@@ -125,7 +112,7 @@ public class ClusterManager implements Watcher {
                 if (s == null) {
                     response = zk.create(rootMembers, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 // Create a node with the name "operations", if it is not created
@@ -133,7 +120,7 @@ public class ClusterManager implements Watcher {
                 if (s == null) {
                     response = zk.create(rootOperations, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 // Create a node with the name "management", if it is not created
@@ -142,7 +129,7 @@ public class ClusterManager implements Watcher {
                     // Created the znode, if it is not created.
                     response = zk.create(rootManagement, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 // Create a node with the name tableAssingmets, if it is not created
@@ -151,7 +138,7 @@ public class ClusterManager implements Watcher {
                     // Created the znode, if it is not created.
                     response = zk.create(rootManagement + tableAssignments, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 // Create a node with the name barrier, if it is not created
@@ -160,7 +147,7 @@ public class ClusterManager implements Watcher {
                     // Created the znode, if it is not created.
                     response = zk.create(rootManagement + initBarrier, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 // Create a node with the name tableAssingmets, if it is not created
@@ -169,7 +156,7 @@ public class ClusterManager implements Watcher {
                     // Created the znode, if it is not created.
                     response = zk.create(rootOperations + responses, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 // Create a node with the name tableAssingmets, if it is not created
@@ -178,7 +165,7 @@ public class ClusterManager implements Watcher {
                     // Created the znode, if it is not created.
                     response = zk.create(rootManagement + temporalAssignments, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 s = zk.exists(rootManagement + quorumRoute, null);
@@ -186,7 +173,7 @@ public class ClusterManager implements Watcher {
                     // Created the znode, if it is not created.
                     response = zk.create(rootManagement + quorumRoute,  ByteBuffer.allocate(4).putInt(Quorum).array(),
                             Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
-                    System.out.println(response);
+                    LOGGER.fine(response);
                 }
 
                 // Create a znode for registering as member and get my id
@@ -197,15 +184,15 @@ public class ClusterManager implements Watcher {
 
                 // Get the children of a node and set a watcher
                 List<String> list = zk.getChildren(rootMembers, membersWatcher, s);
-                System.out.println("Created znode nember id:"+ myId );
+                LOGGER.info("Created znode nember id:"+ myId );
                 printListMembers(list);
 
             } catch (KeeperException e) {
-                System.out.println("The session with Zookeeper failes. Closing");
-                System.out.println(e);
+                LOGGER.severe("The session with Zookeeper failes. Closing");
+                LOGGER.warning(e.toString());
                 return;
             } catch (InterruptedException e) {
-                System.out.println("InterruptedException raised");
+                LOGGER.warning("InterruptedException raised");
             }
 
         }
@@ -217,8 +204,8 @@ public class ClusterManager implements Watcher {
      */
     private Watcher cWatcher = new Watcher() {
         public void process (WatchedEvent e) {
-            System.out.println("Created session");
-            System.out.println(e.toString());
+            LOGGER.info("Created session");
+            LOGGER.fine(e.toString());
             synchronized (mutexBarrier) {
                 mutexBarrier.notify();
             }
@@ -235,7 +222,7 @@ public class ClusterManager implements Watcher {
 
     private Watcher membersWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------ClusterManager:Watcher for  members------------------\n");
+            LOGGER.info("------------------ClusterManager:Watcher for  members------------------\n");
             try {
                 //Miramos en el watcher si tenemos algun nodo nuevo
                 Boolean watcherFound = false; //Miramos si no se nos ha caido el que mira si nos caemos nosotros
@@ -255,26 +242,26 @@ public class ClusterManager implements Watcher {
                     if(!exists  && !member.equals("manager") && !member.equals("listener") && numberOfDHTs<Quorum){
                         int position = writeTableAssigment(assignTable(member));
                         DHTs[position] = member; //Guardamos el nodo nuevo
-                        System.out.println(position);
+                        LOGGER.fine(String.valueOf(position));
                         numberOfDHTs++; //Ahora tenemos un miembro nuevo
-                        System.out.println("Added new member "+member);
+                        LOGGER.info("Added new member "+member);
                     }else if(member.equals("listener") ){
                         watcherFound = true;
                     }
                 }
                 if(watcherFound){
-                    System.out.println("ManagerWatcher still up");
+                    LOGGER.info("ManagerWatcher still up");
                 }else{
-                    System.out.println("ManagerWatcher id down, we should create a new one");
+                    LOGGER.info("ManagerWatcher id down, we should create a new one");
                 }
 
                 if(!initedSystem && numberOfDHTs == Quorum){
                     initedSystem = true;
                     zk.delete(rootManagement + initBarrier,0);
-                    System.out.println("Quorum reached");
+                    LOGGER.info("Quorum reached");
                 }
                 else if(numberOfDHTs>=Quorum){
-                    System.out.println("No more servers needed");
+                    LOGGER.info("No more servers needed");
                 }
                 //Miramos si se ha caido algun nodo de los de la DHT
                 for(int i = 0; i<DHTs.length; i++){
@@ -287,15 +274,15 @@ public class ClusterManager implements Watcher {
                             }
                         }
                         if(!exists){
-                            System.out.println("Node "+ DHTs[i] + " has failed. Looking for leader for table " + i);
+                            LOGGER.info("Node "+ DHTs[i] + " has failed. Looking for leader for table " + i);
                             numberOfDHTs--;
                             String copyDHT = DHTs[i]; //Guardamos la copia para buscar si era lider temporal
                             DHTs[i] = null; //Hay que borrarlo para que asigne bien los temporales
                             assignTemporalLeader(i);
                             for(int j =0; j<temporalLeaders.length; j++){ //Si era lider temporal de alguna tabla
                                 if(copyDHT.equals(temporalLeaders[j])){
-                                    System.out.println("Node " + copyDHT + " was also temporal leader of table " + j);
-                                    System.out.println("Looking for new leader");
+                                    LOGGER.info("Node " + copyDHT + " was also temporal leader of table " + j);
+                                    LOGGER.info("Looking for new leader");
                                     assignTemporalLeader(j);
                                 }
                             }
@@ -304,8 +291,8 @@ public class ClusterManager implements Watcher {
                 }
 
             } catch (Exception e) {
-                System.out.println(e);
-                System.out.println("Exception: watcherMember");
+                LOGGER.warning(e.toString());
+                LOGGER.warning("Exception: watcherMember");
             }
         }
     };
@@ -315,12 +302,12 @@ public class ClusterManager implements Watcher {
     //Watcher for operations events, no hacemos nada con ellas por ahora
     private Watcher operationsWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------ ClusterManager: Watcher for operations ------------------\n");
+          LOGGER.info("------------------ ClusterManager: Watcher for operations ------------------\n");
             try {
                 List<String> list = zk.getChildren(rootOperations,  operationsWatcher);
                 printListMembers(list);
             } catch (Exception e) {
-                System.out.println("Exception: operationsWatcher");
+                LOGGER.warning("Exception: operationsWatcher");
             }
         }
     };
@@ -331,12 +318,12 @@ public class ClusterManager implements Watcher {
     //Watcher for management events, los escribimos nosotros asi que no escuchamos
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
-            System.out.println("------------------ClusterManager:Watcher for management------------------\n");
+            LOGGER.info("------------------ClusterManager:Watcher for management------------------\n");
             try {
                 List<String> list = zk.getChildren(rootManagement,  managementWatcher);
                 printListMembers(list);
             } catch (Exception e) {
-                System.out.println("Exception: operationsWatcher");
+                LOGGER.info("Exception: operationsWatcher");
             }
         }
     };
@@ -352,7 +339,7 @@ public class ClusterManager implements Watcher {
         for(int i=0; i<DHTs.length; i++){
             if(DHTs[i] == null){
                 table = i;
-                System.out.println("First empty table is "+i);
+                LOGGER.info("First empty table is "+i);
                 break;
             }
         }
@@ -369,10 +356,10 @@ public class ClusterManager implements Watcher {
         }
 
         TableAssigment assigment = new TableAssigment(table,replicas,member);
-        System.out.println("Created table assigment with:");
-        System.out.println("Leader: " + assigment.getTableLeader());
+        LOGGER.info("Created table assigment with:");
+        LOGGER.info("Leader: " + assigment.getTableLeader());
         for (int replicaServer: assigment.getTableReplicas()) {
-            System.out.println("Replica : " + replicaServer);
+            LOGGER.info("Replica : " + replicaServer);
         }
         return assigment;
     }
@@ -387,20 +374,20 @@ public class ClusterManager implements Watcher {
                 Stat s = zk.exists(rootManagement + tableAssignments , managementWatcher);
                 if (s != null) {
                     // Created the znode, if it is not created.
-                    System.out.println("Creating assignment node");
+                    LOGGER.info("Creating assignment node");
                     List<String> list = zk.getChildren(rootManagement + tableAssignments, null, s);
                     response = zk.create(rootManagement + tableAssignments +aTable, data,
                             ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
-                    System.out.println(response);
+                    LOGGER.info(response);
                     return assigment.getTableLeader();
                 } else {
-                    System.out.println("Node table doesnt exists");
+                    LOGGER.warning("Node table doesnt exists");
                 }
             } catch (KeeperException e) {
-                System.out.println("The session with Zookeeper failes. Closing");
-                System.out.println(e);
+                LOGGER.severe("The session with Zookeeper failes. Closing");
+                LOGGER.warning(e.toString());
             } catch (InterruptedException e) {
-                System.out.println("InterruptedException raised");
+                LOGGER.warning("InterruptedException raised");
             }
         }
         return 0;
@@ -416,20 +403,20 @@ public class ClusterManager implements Watcher {
                 Stat s = zk.exists(rootManagement + temporalAssignments , managementWatcher);
                 if (s != null) {
                     // Created the znode, if it is not created.
-                    System.out.println("Creating assignment node");
+                    LOGGER.info("Creating assignment node");
                     zk.getChildren(rootManagement + temporalAssignments, null, s);
                     response = zk.create(rootManagement + temporalAssignments +aTable, data,
                             ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
-                    System.out.println(response);
+                    LOGGER.fine(response);
                     return assigment.getTableLeader();
                 } else {
-                    System.out.println("Node temporal table doesnt exists");
+                    LOGGER.warning("Node temporal table doesnt exists");
                 }
             } catch (KeeperException e) {
-                System.out.println("The session with Zookeeper failes. Closing");
-                System.out.println(e);
+                LOGGER.severe("The session with Zookeeper failes. Closing");
+                LOGGER.warning(e.toString());
             } catch (InterruptedException e) {
-                System.out.println("InterruptedException raised");
+                LOGGER.warning("InterruptedException raised");
             }
         }
         return 0;
@@ -445,11 +432,11 @@ public class ClusterManager implements Watcher {
             }
             if(DHTs[position] != null){
                 temporalLeaders[i] = DHTs[position];
-                System.out.println("Temporal leader is: " + DHTs[position]);
+                LOGGER.info("Temporal leader is: " + DHTs[position]);
                 replicaFound = true;
                 break;
             } else{
-                System.out.println("Replica "+ (j+1) + " is down, looking for next one");
+                LOGGER.info("Replica "+ (j+1) + " is down, looking for next one");
             }
 
         }
@@ -457,7 +444,7 @@ public class ClusterManager implements Watcher {
             TableTemporalAssignment assigment = new TableTemporalAssignment(i,DHTs[position]);
             writeTemporalTableAssigment(assigment);
         }else{
-            System.out.println("Replica for could not be found. Table " + i + " lost");
+            LOGGER.info("Replica for could not be found. Table " + i + " lost");
         }
 
     }
@@ -472,34 +459,39 @@ public class ClusterManager implements Watcher {
      * @param list The list to be printed
      */
     private void printListMembers (List<String> list) {
-        System.out.println("Remaining # members:" + list.size());
+        LOGGER.info("Remaining # members:" + list.size());
         for (Iterator<String> iterator = list.iterator(); iterator.hasNext();) {
             String string = (String) iterator.next();
-            System.out.print(string + ", ");
+            LOGGER.info(string + ", ");
         }
-        System.out.println();
-
     }
 
     //Esto es para implementar la clase watcher(lo pide por algun motivo) y que no se nos mueran los procesos.
     @Override
     public void process(WatchedEvent event) {
         try {
-            System.out.println("Unexpected invocated this method. Process of the object");
+            LOGGER.warning("Unexpected invocated this method. Process of the object");
         } catch (Exception e) {
-            System.out.println("Unexpected exception. Process of the object");
+            LOGGER.warning("Unexpected exception. Process of the object");
         }
     }
 
 
     public static void main(String[] args) {
+        System.setProperty("java.util.logging.SimpleFormatter.format",
+                "[%4$-7s] %5$s %n");
+        ConsoleHandler handler = new ConsoleHandler();
+        handler.setLevel(Level.WARNING);
+        LOGGER.addHandler(handler);
+        LOGGER.setLevel(Level.WARNING);
+        LOGGER.setLevel(Level.INFO);
         ClusterManager clusterManager = new ClusterManager(4,2,null,null);
         clusterManager.init();
-        System.out.println("Inited manager");
+        LOGGER.info("Inited manager");
         try {
             Thread.sleep(300000000);
         } catch (Exception e) {
-            System.out.println("Exception in the sleep in main");
+            LOGGER.info("Exception in the sleep in main");
         }
     }
 }
