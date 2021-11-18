@@ -9,6 +9,7 @@ import org.apache.zookeeper.*;
 import org.apache.zookeeper.data.Stat;
 import org.apache.zookeeper.ZooDefs.Ids;
 
+import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
@@ -28,6 +29,7 @@ public class ClusterManager implements Watcher {
     private static String initBarrier;
     private static String responses;
     private static String temporalAssignments;
+    private static String quorumRoute;
     Integer mutexBarrier = -1;
     private String myId;
     private static final int SESSION_TIMEOUT = 5000;
@@ -59,6 +61,7 @@ public class ClusterManager implements Watcher {
         responses = Common.responses;
         temporalAssignments = Common.temporalAssignments;
         this.Quorum = Quorum;
+        quorumRoute = Common.quorumRoute;
         if(DHTs == null){
             this.DHTs = new String[Quorum];
         }else{
@@ -151,7 +154,7 @@ public class ClusterManager implements Watcher {
                     System.out.println(response);
                 }
 
-                // Create a node with the name tableAssingmets, if it is not created
+                // Create a node with the name barrier, if it is not created
                 s = zk.exists(rootManagement + initBarrier, null);
                 if (s == null) {
                     // Created the znode, if it is not created.
@@ -175,6 +178,14 @@ public class ClusterManager implements Watcher {
                     // Created the znode, if it is not created.
                     response = zk.create(rootManagement + temporalAssignments, new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    System.out.println(response);
+                }
+
+                s = zk.exists(rootManagement + quorumRoute, null);
+                if (s == null) {
+                    // Created the znode, if it is not created.
+                    response = zk.create(rootManagement + quorumRoute,  ByteBuffer.allocate(4).putInt(Quorum).array(),
+                            Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
                     System.out.println(response);
                 }
 
@@ -281,7 +292,7 @@ public class ClusterManager implements Watcher {
                             String copyDHT = DHTs[i]; //Guardamos la copia para buscar si era lider temporal
                             DHTs[i] = null; //Hay que borrarlo para que asigne bien los temporales
                             assignTemporalLeader(i);
-                            for(int j =0; j<temporalLeaders.length; j++){
+                            for(int j =0; j<temporalLeaders.length; j++){ //Si era lider temporal de alguna tabla
                                 if(copyDHT.equals(temporalLeaders[j])){
                                     System.out.println("Node " + copyDHT + " was also temporal leader of table " + j);
                                     System.out.println("Looking for new leader");
@@ -428,9 +439,9 @@ public class ClusterManager implements Watcher {
         int position = i;
         Boolean replicaFound = false;
         for(int j= 0; j < replicationFactor; j++){
-            position++;
-            if((position)>=Quorum){
-                position = 0;
+            position--;
+            if((position)<0){
+                position = Quorum-1;
             }
             if(DHTs[position] != null){
                 temporalLeaders[i] = DHTs[position];
@@ -482,7 +493,7 @@ public class ClusterManager implements Watcher {
 
 
     public static void main(String[] args) {
-        ClusterManager clusterManager = new ClusterManager(3,2,null,null);
+        ClusterManager clusterManager = new ClusterManager(4,2,null,null);
         clusterManager.init();
         System.out.println("Inited manager");
         try {

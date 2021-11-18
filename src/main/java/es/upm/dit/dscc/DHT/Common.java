@@ -15,4 +15,5 @@ public class Common {
     public static String initBarrier = "/barrier";
     public static String responses = "/responses";
     public static String temporalAssignments = "/temporalAssignments";
+    public static String quorumRoute = "/quorum";
 }
