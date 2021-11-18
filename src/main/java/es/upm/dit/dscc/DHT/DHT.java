@@ -10,9 +10,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
-
-
-
 //La clase de DHT
 public class DHT implements Watcher{
 
@@ -26,6 +23,7 @@ public class DHT implements Watcher{
     private static String aOperation;
     private static String tableAssignments;
     private static String responses;
+    private static String temporalAssignments;
 
     //Ultima operacion escuchada para no repetir
     private int lastOperation=-1; //Ultima operacion escuchada, por si me llegan repetidas antes de que alguien borre.
@@ -37,8 +35,7 @@ public class DHT implements Watcher{
     private static final int SESSION_TIMEOUT = 5000;
     private String myId;
     private int leaderOfTable; //De que tabla contesto gets
-    private int[] temporalLeaderOfTables; //Tablas de las que soy lider pero no deberia
-    private boolean imTemporalLeader = false; //Si soy lider temporal para escuchar el resto de asignaciones
+    private boolean[] temporalLeaderOfTables; //Tablas de las que soy lider pero no deberia
     private int[] myReplicas;
     private static String initBarrier;
     private boolean listenPetitions = false; //Si se ha llegado al quorum empiezo a contestar.
@@ -53,6 +50,7 @@ public class DHT implements Watcher{
         tableAssignments = Common.tableAssignments;
         initBarrier = Common.initBarrier;
         responses = Common.responses;
+        temporalAssignments = Common.temporalAssignments;
     }
 
     /* ---------------------Initialization ---------------------------------  */
@@ -90,6 +88,7 @@ public class DHT implements Watcher{
                 List<String> l= zk.getChildren(rootManagement, managementWatcher);
                 zk.getChildren(rootOperations, operationsWatcher);
                 zk.getChildren(rootOperations+responses, responseWatcher);
+                zk.getChildren(rootManagement+temporalAssignments, temportalAssignmentWatcher);
                 l = zk.getChildren(rootManagement + tableAssignments, tableWatcher);
                 myId = myId.replace(rootMembers + "/", "");
                 processAssignments(l);
@@ -175,17 +174,52 @@ public class DHT implements Watcher{
                 leaderOfTable = assigment.getTableLeader(); //Soy el lider de la tabla
                 System.out.print("And replica for tables: ");
                 myReplicas = assigment.getTableReplicas(); //Mis replicas son
-                temporalLeaderOfTables = new int[myReplicas.length];
+                temporalLeaderOfTables = new boolean[myReplicas.length];
                 for(int i=0; i<assigment.getTableReplicas().length; i++) {
                     System.out.print(assigment.getTableReplicas()[i]+ " ");
                 }
                 System.out.println("\n");
                 zk.delete(rootManagement+tableAssignments+"/"+ string,s.getVersion());
-            }else{
+            }else if(temporalLeaderOfTables[assigment.getTableLeader()]){
+                System.out.println("There is a new leader for table : "+ assigment.getTableLeader());
+                System.out.println("My temporal work here is done");
+                temporalLeaderOfTables[assigment.getTableLeader()] = false;
+            }
+            else{
                 System.out.println("I am "+ myId + " and this is for " + assigment.getDHTId() );
             }
         }
     }
+
+    //Watcher for table assignment events
+    private Watcher temportalAssignmentWatcher = new Watcher() {
+        public void process(WatchedEvent event) {
+            System.out.println("------------------DHT:Watcher for temporal table assignments------------------\n");
+            try {
+                List<String> list = zk.getChildren(rootManagement+ temporalAssignments ,  temportalAssignmentWatcher);
+                Stat s = new Stat();
+                for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
+                    String string = (String) iterator.next();
+                    byte[] data = zk.getData(rootManagement+ temporalAssignments+"/"+ string, null, s); //Leemos el nodo
+                    TableTemporalAssignment assigment = (TableTemporalAssignment) SerializationUtils.deserialize(data); //byte -> Order
+                    if(assigment.getDHTId().equals(myId)){ //Si hay alguna peticion para mi
+                        System.out.println("Temporal ssignment for me: "+ myId);
+                        System.out.println("I am temporal leader for table:"+ assigment.getTableLeader());
+                        temporalLeaderOfTables[ assigment.getTableLeader()] = true;
+                        System.out.println("\n");
+                        zk.delete(rootManagement+ temporalAssignments+"/"+ string,s.getVersion());
+                    }else{
+                        System.out.println("I am "+ myId + " and this temporal assignment is for " + assigment.getDHTId() );
+                    }
+                }
+            } catch (Exception e) {
+                System.out.println(e);
+                System.out.println("Exception: tableWatcher");
+            }
+        }
+    };
+
+
 
     /* ---------------------Functions for operations---------------------------------  */
 
@@ -208,14 +242,18 @@ public class DHT implements Watcher{
                     byte[] data = zk.getData(rootOperations +"/"+ string, null, stat); //Leemos el nodo
                     DHTPetition oper = (DHTPetition) SerializationUtils.deserialize(data); //byte -> Order
                     System.out.print("\nOperation " + oper.getOperation().toString());
-                    System.out.print("\nOperation " + oper.getGUID());
+                    System.out.print("\nOperation " + oper.getTableId());
 
-                    if(Integer.parseInt(oper.getGUID()) == leaderOfTable ){ //Si la peticion va para la tabla de la que soy lider
+                    if(oper.getTableId()== leaderOfTable ){ //Si la peticion va para la tabla de la que soy lider
                         System.out.println("I am the leader of the table and should listen to operation");
-
-                        DHTResponse response = new DHTResponse("a",new DHT_Map("a",2));
+                        DHTResponse response = new DHTResponse(1,new DHT_Map("a",2));
                         sendResponse(response,string);
-                    }else if(ArrayUtils.contains(myReplicas,Integer.parseInt(oper.getGUID()))){ //Si somos replica de la tabla
+                    }else if(temporalLeaderOfTables[oper.getTableId()]){
+                        System.out.println("I am the temporal leader of the table and should listen to operation");
+                        DHTResponse response = new DHTResponse(1,new DHT_Map("a",2));
+                        sendResponse(response,string);
+                    }
+                    else if(ArrayUtils.contains(myReplicas,oper.getTableId())){ //Si somos replica de la tabla
                         if(oper.getOperation() == OperationEnum.PUT_MAP){
                             System.out.println("I am replica and should execute put");
                         } else if(oper.getOperation() == OperationEnum.GET_MAP){
@@ -279,7 +317,7 @@ public class DHT implements Watcher{
     };
 
     //Escribe un nodo con una operacion
-    public void sendOperation(OperationEnum _operation,  String _GUID, DHT_Map _map){
+    public void sendOperation(OperationEnum _operation,  int _GUID, DHT_Map _map){
         DHTPetition DHTPetition = new DHTPetition(_operation,_GUID,_map);
         byte[] data = SerializationUtils.serialize(DHTPetition); //Operation -> byte[]
 
@@ -361,7 +399,7 @@ public class DHT implements Watcher{
         dht1.init();
         System.out.println("Inited");
         Thread.sleep(2000);
-        dht1.sendOperation(OperationEnum.PUT_MAP,"1",new DHT_Map("a",2));
+        dht1.sendOperation(OperationEnum.PUT_MAP,1,new DHT_Map("a",2));
         System.out.println("Operation sended");
 
         try {

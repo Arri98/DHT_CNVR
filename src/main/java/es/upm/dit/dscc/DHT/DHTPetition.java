@@ -7,12 +7,12 @@ import java.io.Serializable;
 public class DHTPetition implements Serializable  {
 
     private OperationEnum operation; //Tipo de operacion
-    private String GUID; //Esto habra que quitarlo o cambiarle el nombre, por ahora es la tabla a la que le pido el valor.
+    private int tableId; //Esto habra que quitarlo o cambiarle el nombre, por ahora es la tabla a la que le pido el valor.
     private DHT_Map map;// Datos
 
-    DHTPetition(OperationEnum _operation, String _GUID, DHT_Map _map){
+    DHTPetition(OperationEnum _operation, int tableId, DHT_Map _map){
         operation = _operation;
-        GUID = _GUID;
+        this.tableId = tableId;
         map = _map;
     }
 
@@ -20,8 +20,8 @@ public class DHTPetition implements Serializable  {
         return operation;
     }
 
-    public String getGUID() {
-        return GUID;
+    public int getTableId() {
+        return tableId;
     }
 
     public DHT_Map getMap() {

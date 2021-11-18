@@ -406,7 +406,7 @@ public class ClusterManager implements Watcher {
                 if (s != null) {
                     // Created the znode, if it is not created.
                     System.out.println("Creating assignment node");
-                    zk.getChildren(rootManagement + tableAssignments, null, s);
+                    zk.getChildren(rootManagement + temporalAssignments, null, s);
                     response = zk.create(rootManagement + temporalAssignments +aTable, data,
                             ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL); //Nodo secuencial efimero
                     System.out.println(response);
