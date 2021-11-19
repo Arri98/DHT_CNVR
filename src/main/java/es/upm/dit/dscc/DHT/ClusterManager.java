@@ -31,6 +31,8 @@ public class ClusterManager implements Watcher {
     private static String responses;
     private static String temporalAssignments;
     private static String quorumRoute;
+    private static String integration;
+    private static String aIntegration;
     Integer mutexBarrier = -1;
     private String myId;
     private static final int SESSION_TIMEOUT = 5000;
@@ -59,6 +61,8 @@ public class ClusterManager implements Watcher {
         initBarrier = Common.initBarrier;
         responses = Common.responses;
         temporalAssignments = Common.temporalAssignments;
+        integration = Common.integration;
+        aIntegration = Common.aIntegration;
         this.Quorum = Quorum;
         quorumRoute = Common.quorumRoute;
         if(DHTs == null){
@@ -176,6 +180,14 @@ public class ClusterManager implements Watcher {
                     LOGGER.fine(response);
                 }
 
+                s = zk.exists(rootManagement + integration, null);
+                if (s == null) {
+                    // Created the znode, if it is not created.
+                    response = zk.create(rootManagement + integration,   new byte[0],
+                            Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    LOGGER.fine(response);
+                }
+
                 // Create a znode for registering as member and get my id
                 myId = zk.create(rootMembers + manager, new byte[0],
                         Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
@@ -240,8 +252,16 @@ public class ClusterManager implements Watcher {
                     //Si tenemos una DHT nueva y no hemos llegado al quorum le asignamos su tablas y replicas
                     //Ya que estamos miramos si el watcher sigue vivo
                     if(!exists  && !member.equals("manager") && !member.equals("listener") && numberOfDHTs<Quorum){
-                        int position = writeTableAssigment(assignTable(member));
+                        TableAssigment assigment = assignTable(member);
+                        int position = writeTableAssigment(assigment);
                         DHTs[position] = member; //Guardamos el nodo nuevo
+                        if(temporalLeaders[position] != null){
+                            temporalLeaders[position] = null;
+                            LOGGER.info("Member needs integration");
+                            byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
+                            zk.create(rootManagement + integration +aIntegration, data,
+                                    ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+                        }
                         LOGGER.fine(String.valueOf(position));
                         numberOfDHTs++; //Ahora tenemos un miembro nuevo
                         LOGGER.info("Added new member "+member);

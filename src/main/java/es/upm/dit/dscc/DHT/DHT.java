@@ -5,6 +5,9 @@ import org.apache.commons.lang.SerializationUtils;
 import org.apache.zookeeper.*;
 import org.apache.zookeeper.data.Stat;
 
+import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.logging.ConsoleHandler;
@@ -27,6 +30,7 @@ public class DHT implements Watcher{
     private static String temporalAssignments;
     private static String initBarrier;
     private static String quorumRoute;
+    private static String integration;
 
     //Ultima operacion escuchada para no repetir
     private int lastOperation=-1; //Ultima operacion escuchada, por si me llegan repetidas antes de que alguien borre.
@@ -44,6 +48,8 @@ public class DHT implements Watcher{
     //Logger configuration
     private static final Logger LOGGER = Logger.getLogger(DHT.class.getName());
 
+    private ServerSocket ss;
+
     DHT(){
         rootMembers = Common.rootMembers;
         rootOperations = Common.rootOperations;
@@ -56,6 +62,7 @@ public class DHT implements Watcher{
         responses = Common.responses;
         temporalAssignments = Common.temporalAssignments;
         quorumRoute = Common.quorumRoute;
+        integration = Common.integration;
     }
 
     /* ---------------------Initialization ---------------------------------  */
@@ -93,6 +100,8 @@ public class DHT implements Watcher{
                 zk.getChildren(rootOperations, operationsWatcher);
                 zk.getChildren(rootOperations+responses, responseWatcher);
                 zk.getChildren(rootManagement+temporalAssignments, temportalAssignmentWatcher);
+                List<String> l2 = zk.getChildren(rootManagement+integration, integrationWatcher);
+
                 byte[] quorum = zk.getData(rootManagement+quorumRoute,null,null);
                 Quorum = ByteBuffer.wrap(quorum).getInt();
                 System.out.println("Quourm for this session is "+ Quorum);
@@ -103,10 +112,25 @@ public class DHT implements Watcher{
                 myId = myId.replace(rootMembers + "/", "");
                 processAssignments(l);
                 System.out.println("I am: "+myId);
+                Stat s = new Stat();
+                for (Iterator<String> iterator = l2.iterator(); iterator.hasNext(); ) {
+                    String string = (String) iterator.next();
+                    LOGGER.info("Found integration " + string);
+                    byte[] data = zk.getData(rootManagement + integration + "/" + string, null, s); //Leemos el nodo
+                    TableAssigment assigment = (TableAssigment) SerializationUtils.deserialize(data); //byte -> Order
+                    LOGGER.info("Integration for"+ assigment.getDHTId());
+                    if (assigment.getDHTId().equals(myId)) {
+                        LOGGER.info("This integration is for me");
+                        LOGGER.info("Socket inited at" + 3000 + leaderOfTable);
+                        zk.create(rootManagement + integration + "/" + string + "/" + myId ,data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
+                        initSocket(3000 + leaderOfTable);
+                    }
+                }
             } catch (KeeperException e) {
+                LOGGER.severe(e.toString());
                 LOGGER.severe("The session with Zookeeper failes. Closing");
                 return;
-            } catch (InterruptedException e) {
+            } catch (InterruptedException | IOException | ClassNotFoundException e) {
                 LOGGER.severe("InterruptedException raised");
             }
 
@@ -171,8 +195,94 @@ public class DHT implements Watcher{
         }
     };
 
+
+
+    //Watcher for integration events
+    private Watcher integrationWatcher = new Watcher() {
+        public void process(WatchedEvent event) {
+            LOGGER.info("------------------DHT:Watcher for integration------------------\n");
+            try {
+                List<String> list = zk.getChildren(rootManagement+integration,  integrationWatcher);
+                Stat s = new Stat();
+                for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
+                    String string = (String) iterator.next();
+                    LOGGER.info("Found integration "+ string);
+                    byte[] data = zk.getData(rootManagement + integration + "/" + string, null, s); //Leemos el nodo
+                    TableAssigment assigment = (TableAssigment) SerializationUtils.deserialize(data); //byte -> Order
+                    LOGGER.fine("Data serialized");
+                    if(assigment.getDHTId().equals(myId)){
+                        LOGGER.info("This integration is for me");
+                        LOGGER.info("Socket inited at"+ 3000+leaderOfTable);
+                        zk.create(rootManagement + integration + "/" + string + "/" + myId ,data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
+                        initSocket(3000+leaderOfTable);
+                        zk.getChildren(rootManagement + integration + "/" + string,integrationDoneWatcher);
+                    }else{
+                        if(temporalLeaderOfTables[assigment.getTableLeader()]){
+                            List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
+                            if( children.size() ==1){
+                                temporalLeaderOfTables[assigment.getTableLeader()] = false;
+                                LOGGER.info("Im no longer temporal leader of table " + assigment.getTableLeader());
+                                LOGGER.info("Need to send table  " + assigment.getTableLeader());
+                                LOGGER.info("Receptor ready for integration");
+                                sendMessage(new TableIntegration(assigment.getTableLeader(),DHTTables.get(assigment.getTableLeader())),3000+assigment.getTableLeader());
+                                zk.create(rootManagement+integration+"/"+string+"/"+myId, data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+                            }else{
+                                LOGGER.info("Receptor not ready for integration");
+                            }
+                        }
+                        int[] replicas = assigment.getTableReplicas();
+                        for (int i = 0; i < replicas.length; i++){
+                            if(replicas[i] == leaderOfTable){
+                                LOGGER.info("Im leader of table " + replicas[i] + " and need to send my table");
+                                List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
+                                if( children.size()>=1){
+                                    LOGGER.info("Receptor ready for integration");
+                                    int order = Math.abs(assigment.getTableLeader()-leaderOfTable);
+                                    LOGGER.info("I send my table in position " +order) ;
+                                    LOGGER.info("Children position " + children.size());
+                                    if(children.size() == (order+1)){
+                                        sendMessage(new TableIntegration(leaderOfTable,DHTTables.get(leaderOfTable)),3000+assigment.getTableLeader());
+                                        zk.create(rootManagement+integration+"/"+string+"/"+myId, data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+                                    }else{
+                                        LOGGER.info("Children position " + children.size());
+                                    }
+                                }else{
+                                    LOGGER.info("Receptor not ready for integration");
+                                }
+                            }
+                        }
+                    }
+
+                }
+            } catch (Exception e) {
+                LOGGER.warning(e.toString());
+                LOGGER.warning("Exception: integration watcher");
+            }
+        }
+    };
+
+
+    //Watcher for management events
+    private Watcher integrationDoneWatcher = new Watcher() {
+        public void process(WatchedEvent event) {
+            LOGGER.info("------------------DHT:Watcher for integration process------------------\n");
+            try {
+                List<String> list = zk.getChildren(event.getPath(),  integrationDoneWatcher);
+                if(list.size() == myReplicas.length+1){
+                    LOGGER.info("Integration done");
+                    zk.delete(event.getPath(),0);
+                }else{
+                    LOGGER.info("Received "+ list.size()+"/"+myReplicas.length+2);
+                }
+            } catch (Exception e) {
+                LOGGER.warning("Exception: managementWatcher");
+                LOGGER.warning(e.toString());
+            }
+        }
+    };
+
     //Leemos la clase asigment y vemos si tenemos que actualizar algo
-    private void processAssignments(List<String> list) throws InterruptedException, KeeperException {
+    private void processAssignments(List<String> list) throws InterruptedException, KeeperException, IOException, ClassNotFoundException {
         Stat s = new Stat();
         for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
             String string = (String) iterator.next();
@@ -192,8 +302,8 @@ public class DHT implements Watcher{
                 zk.delete(rootManagement+tableAssignments+"/"+ string,s.getVersion());
             }else if(temporalLeaderOfTables[assigment.getTableLeader()]){
                 LOGGER.info("There is a new leader for table : "+ assigment.getTableLeader());
-                LOGGER.info("My temporal work here is done");
-                temporalLeaderOfTables[assigment.getTableLeader()] = false;
+                LOGGER.info("My temporal work here is almost done done");
+                LOGGER.info("Waiting for integration");
             }
             else{
                 LOGGER.info("I am "+ myId + " and this is for " + assigment.getDHTId() );
@@ -497,6 +607,48 @@ public class DHT implements Watcher{
     }
 
     /* ---------------------Main and common functions ---------------------------------  */
+
+
+    private void initSocket(int port) throws IOException, ClassNotFoundException, InterruptedException, KeeperException {
+        for(int i = 0; i <= (myReplicas.length+1); i++ ){
+            ss = new ServerSocket(port);
+            System.out.println("ServerSocket awaiting connections...");
+            Socket socket = ss.accept(); // blocking call, this will wait until a connection is attempted on this port.
+            System.out.println("Connection from " + socket + "!");
+
+            // get the input stream from the connected socket
+            InputStream inputStream = socket.getInputStream();
+            // create a DataInputStream so we can read data from it.
+            ObjectInputStream objectInputStream = new ObjectInputStream(inputStream);
+
+            // read the list of messages from the socket
+            TableIntegration table = (TableIntegration) objectInputStream.readObject();
+            LOGGER.info("Received table "+ table.getTable());
+            System.out.println("Closing sockets.");
+            ss.close();
+            socket.close();
+        }
+
+    }
+
+    private void sendMessage(TableIntegration integration, int port) throws IOException {
+        Socket socket = new Socket("localhost", port);
+        System.out.println("Connected!");
+
+        // get the output stream from the socket.
+        OutputStream outputStream = socket.getOutputStream();
+        // create an object output stream from the output stream so we can send an object through it
+        ObjectOutputStream objectOutputStream = new ObjectOutputStream(outputStream);
+
+        System.out.println("Sending messages to the ServerSocket");
+        objectOutputStream.writeObject(integration);
+
+        System.out.println("Closing socket and terminating.");
+        socket.close();
+    }
+
+
+
 
     @Override
     public void process(WatchedEvent event) {

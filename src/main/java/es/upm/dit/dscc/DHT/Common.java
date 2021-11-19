@@ -16,4 +16,6 @@ public class Common {
     public static String responses = "/responses";
     public static String temporalAssignments = "/temporalAssignments";
     public static String quorumRoute = "/quorum";
+    public static String integration = "/integrations";
+    public static String aIntegration = "/integration-";
 }
