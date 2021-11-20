@@ -10,7 +10,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -124,6 +123,7 @@ public class DHT implements Watcher{
                         LOGGER.info("Socket inited at" + 3000 + leaderOfTable);
                         zk.create(rootManagement + integration + "/" + string + "/" + myId ,data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
                         initSocket(3000 + leaderOfTable);
+                        zk.delete(rootManagement + integration + "/" + string,0);
                     }
                 }
             } catch (KeeperException e) {
@@ -206,16 +206,16 @@ public class DHT implements Watcher{
                 Stat s = new Stat();
                 for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
                     String string = (String) iterator.next();
-                    LOGGER.info("Found integration "+ string);
+                    LOGGER.info("Found integration " + string);
                     byte[] data = zk.getData(rootManagement + integration + "/" + string, null, s); //Leemos el nodo
                     TableAssigment assigment = (TableAssigment) SerializationUtils.deserialize(data); //byte -> Order
-                    LOGGER.fine("Data serialized");
-                    if(assigment.getDHTId().equals(myId)){
+                    LOGGER.info("Integration for"+ assigment.getDHTId());
+                    if (assigment.getDHTId().equals(myId)) {
                         LOGGER.info("This integration is for me");
-                        LOGGER.info("Socket inited at"+ 3000+leaderOfTable);
+                        LOGGER.info("Socket inited at" + 3000 + leaderOfTable);
                         zk.create(rootManagement + integration + "/" + string + "/" + myId ,data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
-                        initSocket(3000+leaderOfTable);
-                        zk.getChildren(rootManagement + integration + "/" + string,integrationDoneWatcher);
+                        initSocket(3000 + leaderOfTable);
+                        zk.delete(rootManagement + integration + "/" + string,0);
                     }else{
                         if(temporalLeaderOfTables[assigment.getTableLeader()]){
                             List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
@@ -232,16 +232,24 @@ public class DHT implements Watcher{
                         }
                         int[] replicas = assigment.getTableReplicas();
                         for (int i = 0; i < replicas.length; i++){
-                            if(replicas[i] == leaderOfTable){
-                                LOGGER.info("Im leader of table " + replicas[i] + " and need to send my table");
+                            if(replicas[i] == leaderOfTable || temporalLeaderOfTables[replicas[i]]){
                                 List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
                                 if( children.size()>=1){
                                     LOGGER.info("Receptor ready for integration");
-                                    int order = Math.abs(assigment.getTableLeader()-leaderOfTable);
-                                    LOGGER.info("I send my table in position " +order) ;
+                                    int order;
+                                    if(replicas[i]>=assigment.getTableLeader()){
+                                        order = replicas[i] - assigment.getTableLeader();
+                                    }else{
+                                        order = replicas[i] - assigment.getTableLeader() - Quorum;
+                                    }
+                                    LOGGER.info("I send my table in position " +order);
                                     LOGGER.info("Children position " + children.size());
                                     if(children.size() == (order+1)){
                                         sendMessage(new TableIntegration(leaderOfTable,DHTTables.get(leaderOfTable)),3000+assigment.getTableLeader());
+                                        if(temporalLeaderOfTables[replicas[i]]){
+                                            temporalLeaderOfTables[replicas[i]] = false;
+                                            LOGGER.info("No longer temporal leader");
+                                        }
                                         zk.create(rootManagement+integration+"/"+string+"/"+myId, data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
                                     }else{
                                         LOGGER.info("Children position " + children.size());
@@ -252,31 +260,10 @@ public class DHT implements Watcher{
                             }
                         }
                     }
-
                 }
             } catch (Exception e) {
                 LOGGER.warning(e.toString());
                 LOGGER.warning("Exception: integration watcher");
-            }
-        }
-    };
-
-
-    //Watcher for management events
-    private Watcher integrationDoneWatcher = new Watcher() {
-        public void process(WatchedEvent event) {
-            LOGGER.info("------------------DHT:Watcher for integration process------------------\n");
-            try {
-                List<String> list = zk.getChildren(event.getPath(),  integrationDoneWatcher);
-                if(list.size() == myReplicas.length+1){
-                    LOGGER.info("Integration done");
-                    zk.delete(event.getPath(),0);
-                }else{
-                    LOGGER.info("Received "+ list.size()+"/"+myReplicas.length+2);
-                }
-            } catch (Exception e) {
-                LOGGER.warning("Exception: managementWatcher");
-                LOGGER.warning(e.toString());
             }
         }
     };
@@ -401,7 +388,10 @@ public class DHT implements Watcher{
             try {
                 List<String> list = zk.getChildren(rootOperations,  operationsWatcher); //Coje la lista de nodos
                 printOperations(list); //Imprime cada uno
-            } catch (Exception e) {
+            }catch (KeeperException e){
+                LOGGER.fine("Someone deleted an operation that was not for me");
+            }
+            catch (Exception e) {
                 LOGGER.warning(e.toString());
                 LOGGER.warning("Exception: operationsWatcher");
             }
@@ -471,7 +461,7 @@ public class DHT implements Watcher{
         }
     }
 
-    private void leaderAnswer(DHTPetition petition, String operation){
+    private void leaderAnswer(DHTPetition petition, String operation) throws InterruptedException, KeeperException {
         switch (petition.getOperation()){
             case GET_MAP:
                 DHT_Map map = getOperation(petition.getMap().getKey()).getMap();
@@ -479,9 +469,11 @@ public class DHT implements Watcher{
                 break;
             case PUT_MAP:
                 getDHT(petition.getMap().getKey()).put(petition.getMap());
+                zk.delete(rootOperations +"/"+ operation,0);
                 break;
             case REMOVE_MAP:
                 removeOperation(petition.getMap().getKey(),false);
+                zk.delete(rootOperations +"/"+ operation,0);
                 break;
             default:
                 LOGGER.warning("Wrong operation");
@@ -610,7 +602,7 @@ public class DHT implements Watcher{
 
 
     private void initSocket(int port) throws IOException, ClassNotFoundException, InterruptedException, KeeperException {
-        for(int i = 0; i <= (myReplicas.length+1); i++ ){
+        for(int i = 0; i <= (myReplicas.length); i++ ){
             ss = new ServerSocket(port);
             System.out.println("ServerSocket awaiting connections...");
             Socket socket = ss.accept(); // blocking call, this will wait until a connection is attempted on this port.
@@ -624,6 +616,7 @@ public class DHT implements Watcher{
             // read the list of messages from the socket
             TableIntegration table = (TableIntegration) objectInputStream.readObject();
             LOGGER.info("Received table "+ table.getTable());
+            DHTTables.put(table.getTable(),table.getHashMap());
             System.out.println("Closing sockets.");
             ss.close();
             socket.close();

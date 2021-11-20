@@ -186,6 +186,12 @@ public class ClusterManager implements Watcher {
                     response = zk.create(rootManagement + integration,   new byte[0],
                             Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
                     LOGGER.fine(response);
+                }else{
+                   List<String> list = zk.getChildren(rootManagement + integration,null);
+                    for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
+                        String path = (String) iterator.next();
+                        zk.delete(rootManagement + integration+"/"+path,0);
+                    }
                 }
 
                 // Create a znode for registering as member and get my id
