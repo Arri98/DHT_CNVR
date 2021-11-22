@@ -11,4 +11,8 @@ buildNumber.properties
 .mvn/timing.properties
 src/main/java/META-INF/
 classes/
+.classpath
+.project
+.settings/org.eclipse.jdt.core.prefs
+
 

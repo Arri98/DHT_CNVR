@@ -116,14 +116,27 @@ public class DHT implements Watcher{
                     String string = (String) iterator.next();
                     LOGGER.info("Found integration " + string);
                     byte[] data = zk.getData(rootManagement + integration + "/" + string, null, s); //Leemos el nodo
-                    TableAssigment assigment = (TableAssigment) SerializationUtils.deserialize(data); //byte -> Order
+                    TableAssignmentIntegration assigment = (TableAssignmentIntegration) SerializationUtils.deserialize(data); //byte -> Order
                     LOGGER.info("Integration for"+ assigment.getDHTId());
-                    if (assigment.getDHTId().equals(myId)) {
+                    if (assigment.getDHTId().equals(myId) && !assigment.isDone()) {
                         LOGGER.info("This integration is for me");
                         LOGGER.info("Socket inited at" + 3000 + leaderOfTable);
                         zk.create(rootManagement + integration + "/" + string + "/" + myId ,data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
                         initSocket(3000 + leaderOfTable);
-                        zk.delete(rootManagement + integration + "/" + string,0);
+                        //TODO: REFRACTOR THIS AS FUNCTION        
+                        assigment.setDone(true);
+                        byte[] dataModified = SerializationUtils.serialize(assigment); //Assignment -> byte[]
+                        zk.setData(rootManagement + integration + "/" + string, dataModified ,s.getVersion());
+                        LOGGER.fine("Assigment finished");
+                        List<String> listChildrens = zk.getChildren(rootManagement + integration + "/" + string, false);
+                        
+                        for (Iterator<String> iterator2 = listChildrens.iterator(); iterator2.hasNext(); ) {
+                        	String node = (String) iterator2.next();
+                        	zk.delete(rootManagement + integration + "/" + string + "/" + node,0);
+                        }
+                        zk.delete(rootManagement + integration + "/" + string,1);
+                       
+                        
                     }
                 }
             } catch (KeeperException e) {
@@ -208,57 +221,70 @@ public class DHT implements Watcher{
                     String string = (String) iterator.next();
                     LOGGER.info("Found integration " + string);
                     byte[] data = zk.getData(rootManagement + integration + "/" + string, null, s); //Leemos el nodo
-                    TableAssigment assigment = (TableAssigment) SerializationUtils.deserialize(data); //byte -> Order
+                    TableAssignmentIntegration assigment = (TableAssignmentIntegration) SerializationUtils.deserialize(data); //byte -> Order
                     LOGGER.info("Integration for"+ assigment.getDHTId());
-                    if (assigment.getDHTId().equals(myId)) {
+                    if (assigment.getDHTId().equals(myId) && !assigment.isDone()) {
                         LOGGER.info("This integration is for me");
                         LOGGER.info("Socket inited at" + 3000 + leaderOfTable);
                         zk.create(rootManagement + integration + "/" + string + "/" + myId ,data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
                         initSocket(3000 + leaderOfTable);
-                        zk.delete(rootManagement + integration + "/" + string,0);
-                    }else{
-                        if(temporalLeaderOfTables[assigment.getTableLeader()]){
-                            List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
-                            if( children.size() ==1){
-                                temporalLeaderOfTables[assigment.getTableLeader()] = false;
-                                LOGGER.info("Im no longer temporal leader of table " + assigment.getTableLeader());
-                                LOGGER.info("Need to send table  " + assigment.getTableLeader());
-                                LOGGER.info("Receptor ready for integration");
-                                sendMessage(new TableIntegration(assigment.getTableLeader(),DHTTables.get(assigment.getTableLeader())),3000+assigment.getTableLeader());
-                                zk.create(rootManagement+integration+"/"+string+"/"+myId, data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
-                            }else{
-                                LOGGER.info("Receptor not ready for integration");
-                            }
+                        assigment.setDone(true);
+                        byte[] dataModified = SerializationUtils.serialize(assigment); //Assignment -> byte[]
+                        zk.setData(rootManagement + integration + "/" + string, dataModified ,s.getVersion());
+                        LOGGER.fine("Assigment finished");
+                        List<String> listChildrens = zk.getChildren(rootManagement + integration + "/" + string, false);
+                        
+                        for (Iterator<String> iterator2 = listChildrens.iterator(); iterator2.hasNext(); ) {
+                        	String node = (String) iterator2.next();
+                        	zk.delete(rootManagement + integration + "/" + string + "/" + node,0);
                         }
-                        int[] replicas = assigment.getTableReplicas();
-                        for (int i = 0; i < replicas.length; i++){
-                            if(replicas[i] == leaderOfTable || temporalLeaderOfTables[replicas[i]]){
+                        zk.delete(rootManagement + integration + "/" + string,1);
+                    }else{
+                    	if( !assigment.isDone() ) {
+                    		if(temporalLeaderOfTables[assigment.getTableLeader()]){
                                 List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
-                                if( children.size()>=1){
+                                if( children.size() ==1){
+                                    temporalLeaderOfTables[assigment.getTableLeader()] = false;
+                                    LOGGER.info("Im no longer temporal leader of table " + assigment.getTableLeader());
+                                    LOGGER.info("Need to send table  " + assigment.getTableLeader());
                                     LOGGER.info("Receptor ready for integration");
-                                    int order;
-                                    if(replicas[i]>=assigment.getTableLeader()){
-                                        order = replicas[i] - assigment.getTableLeader();
-                                    }else{
-                                        order = replicas[i] - assigment.getTableLeader() - Quorum;
-                                    }
-                                    LOGGER.info("I send my table in position " +order);
-                                    LOGGER.info("Children position " + children.size());
-                                    if(children.size() == (order+1)){
-                                        sendMessage(new TableIntegration(leaderOfTable,DHTTables.get(leaderOfTable)),3000+assigment.getTableLeader());
-                                        if(temporalLeaderOfTables[replicas[i]]){
-                                            temporalLeaderOfTables[replicas[i]] = false;
-                                            LOGGER.info("No longer temporal leader");
-                                        }
-                                        zk.create(rootManagement+integration+"/"+string+"/"+myId, data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
-                                    }else{
-                                        LOGGER.info("Children position " + children.size());
-                                    }
+                                    sendMessage(new TableIntegration(assigment.getTableLeader(),DHTTables.get(assigment.getTableLeader())),3000+assigment.getTableLeader());
+                                    zk.create(rootManagement+integration+"/"+string+"/"+myId, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
                                 }else{
                                     LOGGER.info("Receptor not ready for integration");
                                 }
                             }
-                        }
+                            int[] replicas = assigment.getTableReplicas();
+                            for (int i = 0; i < replicas.length; i++){
+                                if(replicas[i] == leaderOfTable || temporalLeaderOfTables[replicas[i]]){
+                                    List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
+                                    if( children.size()>=1){
+                                        LOGGER.info("Receptor ready for integration");
+                                        int order;
+                                        if(replicas[i]>=assigment.getTableLeader()){
+                                            order = replicas[i] - assigment.getTableLeader();
+                                        }else{
+                                            order = replicas[i] - assigment.getTableLeader() - Quorum - 1;
+                                        }
+                                        LOGGER.info("I send my table in position " +order);
+                                        LOGGER.info("Children position " + children.size());
+                                        if(children.size() == (order+1)){
+                                            sendMessage(new TableIntegration(leaderOfTable,DHTTables.get(leaderOfTable)),3000+assigment.getTableLeader());
+                                            if(temporalLeaderOfTables[replicas[i]]){
+                                                temporalLeaderOfTables[replicas[i]] = false;
+                                                LOGGER.info("No longer temporal leader");
+                                            }
+                                            zk.create(rootManagement+integration+"/"+string+"/"+myId, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+                                        }else{
+                                            LOGGER.info("Children position " + children.size());
+                                        }
+                                    }else{
+                                        LOGGER.info("Receptor not ready for integration");
+                                    }
+                                }
+                            }
+                    	}
+                        
                     }
                 }
             } catch (Exception e) {

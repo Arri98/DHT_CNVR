@@ -190,7 +190,9 @@ public class ClusterManager implements Watcher {
                    List<String> list = zk.getChildren(rootManagement + integration,null);
                     for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
                         String path = (String) iterator.next();
-                        zk.delete(rootManagement + integration+"/"+path,0);
+                        Stat s2 = new Stat();
+                        zk.getData(rootManagement + integration+"/"+ path, null, s2);
+                        zk.delete(rootManagement + integration+"/"+ path, s2.getVersion());
                     }
                 }
 
@@ -264,7 +266,8 @@ public class ClusterManager implements Watcher {
                         if(temporalLeaders[position] != null){
                             temporalLeaders[position] = null;
                             LOGGER.info("Member needs integration");
-                            byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
+                            TableAssignmentIntegration integrator = new TableAssignmentIntegration(assigment.getTableLeader(),assigment.getTableReplicas(),assigment.getDHTId());
+                            byte[] data = SerializationUtils.serialize(integrator); //Assignment -> byte[]
                             zk.create(rootManagement + integration +aIntegration, data,
                                     ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
                         }
