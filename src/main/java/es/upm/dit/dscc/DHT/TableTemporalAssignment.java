@@ -4,7 +4,7 @@ import java.io.Serializable;
 
 //Clase que se escribe en un znode para indicarle a una DHT de que tabla es el lider temporal de una tabla
 public class TableTemporalAssignment implements Serializable {
-    private int tableLeader; //Tabla de la que asign el lider lider, cuando piden un get contesto el DHTID
+    private int tableLeader;
     private String DHTId; // DHT que gestiona las tablas indicadas
 
 

@@ -243,7 +243,7 @@ public class DHT implements Watcher{
                     	if( !assigment.isDone() ) {
                     		if(temporalLeaderOfTables[assigment.getTableLeader()]){
                                 List<String> children  = zk.getChildren(rootManagement + integration + "/" + string,integrationWatcher);
-                                if( children.size() ==1){
+                                if( children.size() == 1){
                                     temporalLeaderOfTables[assigment.getTableLeader()] = false;
                                     LOGGER.info("Im no longer temporal leader of table " + assigment.getTableLeader());
                                     LOGGER.info("Need to send table  " + assigment.getTableLeader());
@@ -261,19 +261,15 @@ public class DHT implements Watcher{
                                     if( children.size()>=1){
                                         LOGGER.info("Receptor ready for integration");
                                         int order;
-                                        if(replicas[i]>=assigment.getTableLeader()){
+                                        if(replicas[i] >= assigment.getTableLeader()){
                                             order = replicas[i] - assigment.getTableLeader();
                                         }else{
-                                            order = replicas[i] - assigment.getTableLeader() - Quorum - 1;
+                                            order = replicas[i] - assigment.getTableLeader() + Quorum;
                                         }
-                                        LOGGER.info("I send my table in position " +order);
-                                        LOGGER.info("Children position " + children.size());
+                                        LOGGER.info("I send table " + replicas[i] + " in position " +order);
+                                        LOGGER.info("Children size " + children.size());
                                         if(children.size() == (order+1)){
-                                            sendMessage(new TableIntegration(leaderOfTable,DHTTables.get(leaderOfTable)),3000+assigment.getTableLeader());
-                                            if(temporalLeaderOfTables[replicas[i]]){
-                                                temporalLeaderOfTables[replicas[i]] = false;
-                                                LOGGER.info("No longer temporal leader");
-                                            }
+                                            sendMessage(new TableIntegration(leaderOfTable,DHTTables.get(replicas[i])),3000+assigment.getTableLeader());
                                             zk.create(rootManagement+integration+"/"+string+"/"+myId, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
                                         }else{
                                             LOGGER.info("Children position " + children.size());
@@ -335,7 +331,7 @@ public class DHT implements Watcher{
                     String string = (String) iterator.next();
                     byte[] data = zk.getData(rootManagement+ temporalAssignments+"/"+ string, null, s); //Leemos el nodo
                     TableTemporalAssignment assigment = (TableTemporalAssignment) SerializationUtils.deserialize(data); //byte -> Order
-                    if(assigment.getDHTId().equals(myId)){ //Si hay alguna peticion para mi
+                    if(assigment.getDHTId().equals(myId)){ //Si hay alguna asignacion para mi
                         LOGGER.info("Temporal ssignment for me: "+ myId);
                         LOGGER.info("I am temporal leader for table:"+ assigment.getTableLeader());
                         temporalLeaderOfTables[ assigment.getTableLeader()] = true;
@@ -650,17 +646,25 @@ public class DHT implements Watcher{
 
     }
 
-    private void sendMessage(TableIntegration integration, int port) throws IOException {
+    private void sendMessage(TableIntegration integration, int port) throws InterruptedException, IOException {
         Socket socket = new Socket("localhost", port);
         System.out.println("Connected!");
-
+        Thread.sleep(1000);
         // get the output stream from the socket.
         OutputStream outputStream = socket.getOutputStream();
         // create an object output stream from the output stream so we can send an object through it
         ObjectOutputStream objectOutputStream = new ObjectOutputStream(outputStream);
 
         System.out.println("Sending messages to the ServerSocket");
-        objectOutputStream.writeObject(integration);
+        for(int i=0; i<20; i++){
+            try {
+                LOGGER.info("Try " +i);
+                objectOutputStream.writeObject(integration);
+                break;
+            }catch (Exception e){
+                Thread.sleep(500);
+            }
+        }
 
         System.out.println("Closing socket and terminating.");
         socket.close();
