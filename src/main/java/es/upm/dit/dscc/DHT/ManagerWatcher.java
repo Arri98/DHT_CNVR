@@ -9,21 +9,33 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
+/**
+ * Clase que guarda la informacion necesaria para iniciar un manager nuevo y que escucha las asignaciones de lideres
+ */
+
 public class ManagerWatcher implements Watcher {
 
-    String[] hosts;
-    private ZooKeeper zk;
+    //Campos que necesita un manager para iniciar
     private int Quorum;
     private int replicationFactor;
     private String[] DHTs;
-    Integer mutexBarrier = -1;
-    private String myId;
+
+    //Rutas y zookeeper
     private static final int SESSION_TIMEOUT = 5000;
     private static String rootMembers;
     private static String tableAssignments;
     private static String rootManagement;
+    private ZooKeeper zk;
+    private String myId;
+    String[] hosts;
+    Integer mutexBarrier = -1;
 
-
+    /**
+     * Constructor. DHTs y temporalLeaders son opcionales y sirven para iniciar un watcher en un estado determinado
+     * @param Quorum Numero de tablas y nodos requeridos
+     * @param replicationFactor Numero de copias de cada servidor
+     * @param DHTs Lideres de las tablas
+     */
     ManagerWatcher(int Quorum,int replicationFactor,String[] DHTs){
         Common c = new Common();
         this.Quorum = Quorum;
@@ -39,6 +51,9 @@ public class ManagerWatcher implements Watcher {
         this.rootManagement = c.rootManagement;
     }
 
+    /**
+     * Iniciacion del watcher
+     */
     public void init(){
         //Log4j config
 
@@ -89,6 +104,9 @@ public class ManagerWatcher implements Watcher {
         }
     }
 
+    /**
+     * Watcher de miembros
+     */
     private Watcher membersWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------ Manager Watccher: Watcher for members ------------------\n");
@@ -112,7 +130,10 @@ public class ManagerWatcher implements Watcher {
         }
     };
 
-    //Watcher for table assignment events
+    /**
+     * Watcher for table assignment events
+     */
+
     private Watcher tableWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             System.out.println("------------------Watcher for table assignments------------------\n");

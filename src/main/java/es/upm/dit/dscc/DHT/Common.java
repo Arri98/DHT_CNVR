@@ -1,6 +1,8 @@
 package es.upm.dit.dscc.DHT;
 
-//Rutcas comunes para cambiarlas de una
+/**
+ * Rutas para los nodos de zookeeper
+ */
 
 public class Common {
     public static String rootMembers = "/members";

@@ -13,7 +13,10 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-//La clase de DHT
+
+/**
+ * Nodo de la DHT. Envia y recibe peticiones, integra tablas.
+ */
 public class DHT implements Watcher{
 
     String[] hosts;
@@ -49,6 +52,9 @@ public class DHT implements Watcher{
 
     private ServerSocket ss;
 
+    /**
+     * Constructor
+     */
     DHT(){
         rootMembers = Common.rootMembers;
         rootOperations = Common.rootOperations;
@@ -66,6 +72,9 @@ public class DHT implements Watcher{
 
     /* ---------------------Initialization ---------------------------------  */
 
+    /**
+     * Inicialicacion de la conexion a zookeeper.
+     */
     public void init(){
         Random rand = new Random();
         int i = rand.nextInt(hosts.length);
@@ -168,7 +177,10 @@ public class DHT implements Watcher{
 
     /* ---------------------Functions for management---------------------------------  */
 
-    //Watcher for table assignment events
+
+    /**
+     * Watcher for table assignment events
+     */
     private Watcher tableWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             LOGGER.info("------------------DHT:Watcher for table assignments------------------\n");
@@ -185,7 +197,9 @@ public class DHT implements Watcher{
 
 
 
-    //Watcher for management events
+    /**
+     * Watcher for management  events
+     */
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             LOGGER.info("------------------DHT:Watcher for management------------------\n");
@@ -210,7 +224,9 @@ public class DHT implements Watcher{
 
 
 
-    //Watcher for integration events
+    /**
+     * Watcher for integrations events
+     */
     private Watcher integrationWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             LOGGER.info("------------------DHT:Watcher for integration------------------\n");
@@ -289,8 +305,15 @@ public class DHT implements Watcher{
             }
         }
     };
-
-    //Leemos la clase asigment y vemos si tenemos que actualizar algo
+    
+    /**
+     * Leemos la clase asigment y vemos si tenemos que actualizar algo
+     * @param list Lista recibida del nodo table assigments
+     * @throws InterruptedException
+     * @throws KeeperException
+     * @throws IOException
+     * @throws ClassNotFoundException
+     */
     private void processAssignments(List<String> list) throws InterruptedException, KeeperException, IOException, ClassNotFoundException {
         Stat s = new Stat();
         for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
@@ -320,7 +343,9 @@ public class DHT implements Watcher{
         }
     }
 
-    //Watcher for table assignment events
+    /**
+     * Watcher for table assignment events
+     */
     private Watcher temportalAssignmentWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             LOGGER.info("------------------DHT:Watcher for temporal table assignments------------------\n");
@@ -352,7 +377,14 @@ public class DHT implements Watcher{
 
     /* ---------------------Functions for operations---------------------------------  */
 
-    //Recibe la lista de operaciones y va a cada nodo a recibir la info
+
+
+    /**
+     * Recibe la lista de operaciones y va a cada nodo a recibir cada operacion. Si es para el la processa
+     * @param list Lista del nodo operaciones
+     * @throws InterruptedException
+     * @throws KeeperException
+     */
     private void printOperations (List<String> list) throws InterruptedException, KeeperException {
         Stat stat = new Stat();
         for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
@@ -402,8 +434,9 @@ public class DHT implements Watcher{
         }
     }
 
-
-    //Cuando se añaden operaciones a operations
+    /**
+     * Cuando se añaden operaciones a operations
+     */
     private Watcher operationsWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             LOGGER.info("------------------Watcher for operations------------------\n");
@@ -420,7 +453,9 @@ public class DHT implements Watcher{
         }
     };
 
-    //Cuando se añaden responses a operations
+    /**
+     * Watcher para las respuestas. Mira en el nodo si hay alguna respuesta para el nodo y la imprime por pantalla si ocurre.
+     */
     private Watcher responseWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             LOGGER.info("------------------Watcher for responses------------------\n");
@@ -450,7 +485,13 @@ public class DHT implements Watcher{
         }
     };
 
-    //Escribe un nodo con una operacion
+
+    /**
+     * Escribe una operacion en el nodo, para pedir un valor
+     * @param _operation Tipo de operacion
+     * @param _GUID Tabla sobre la que se realiza la operacion
+     * @param _map Map con la informacion de la operacion
+     */
     public void sendOperation(OperationEnum _operation,  int _GUID, DHT_Map _map){
         DHTPetition DHTPetition = new DHTPetition(_operation,_GUID,_map);
         byte[] data = SerializationUtils.serialize(DHTPetition); //Operation -> byte[]
@@ -483,6 +524,14 @@ public class DHT implements Watcher{
         }
     }
 
+    /**
+     * Funcion para emitir una respuesta a una DHT petition si somos el lider de la tabla. Leemos put y remove y contestamos
+     * a los gets
+     * @param petition
+     * @param operation
+     * @throws InterruptedException
+     * @throws KeeperException
+     */
     private void leaderAnswer(DHTPetition petition, String operation) throws InterruptedException, KeeperException {
         switch (petition.getOperation()){
             case GET_MAP:
@@ -502,7 +551,11 @@ public class DHT implements Watcher{
         }
     }
 
-    //Escribe un nodo con una operacion
+    /**
+     * Escribe un nodo con la respuesta a la operacion.
+     * @param res Respuesta  a escribir
+     * @param operation Respuesta a la operacion
+     */
     private void sendResponse(DHTResponse res,String operation){
         byte[] data = SerializationUtils.serialize(res); //Response -> byte[]
 
@@ -532,8 +585,13 @@ public class DHT implements Watcher{
     }
     /* ---------------------Insert and get functions ---------------------------------  */
 
+    /**
+     * Devuelve la tabla en la que se encuentra una key
+     * @author aalonso
+     * @param key Key de la que se quiere conocer la tabla
+     * @return Numero de la tabla
+     */
     private Integer getPos (String key) {
-
         int hash =	key.hashCode();
         if (hash < 0) {
             LOGGER.warning("Hash value is negative!!!!!");
@@ -553,12 +611,16 @@ public class DHT implements Watcher{
 
     }
 
-    private void addDHT(DHTUserInterface table, int pos) {DHTTables.put(pos, table);}
-
     private DHTUserInterface getDHT(String key) {
         return DHTTables.get(getPos(key));
     }
 
+    /**
+     * Procesado de una operacion put
+     * @param key Key a insertar
+     * @param value Valor a insertar
+     * @return Respuesta
+     */
     private ScannerAnswer putOperation(String key, int value){
         int position = getPos(key);
             LOGGER.info("Getting  answer");
@@ -566,6 +628,11 @@ public class DHT implements Watcher{
             return new ScannerAnswer(ScannerAnswerEnum.EXTERNAL_PETITION,null);
     }
 
+    /**
+     * Procesado de una opeacion get. Si tenemos la tabla en local constetamos directamete, si no pedimos el valor.
+     * @param key Key de la que se quiere obtener el valor
+     * @return Respueta
+     */
     private ScannerAnswer getOperation(String key){
         int position = getPos(key);
         if(isLocalTable(position)){
@@ -585,6 +652,13 @@ public class DHT implements Watcher{
         }
     }
 
+
+    /**
+     * Procesa una respuesta de remove
+     * @param key Key a eliminar
+     * @param broadcast Si se ha de escribir la operacion en un nodo o solo borar el valor.
+     * @return Respuesta
+     */
     private ScannerAnswer removeOperation(String key,boolean broadcast){
         int position = getPos(key);
         if(isLocalTable(position)){
@@ -607,6 +681,11 @@ public class DHT implements Watcher{
         }
     }
 
+    /**
+     * Devuelve si tenemos una tabla en local
+     * @param position Numero de la tabla
+     * @return Existe la tabla en local
+     */
     private boolean isLocalTable(int position){
         if(position == leaderOfTable){
             return true;
@@ -622,7 +701,14 @@ public class DHT implements Watcher{
 
     /* ---------------------Main and common functions ---------------------------------  */
 
-
+    /**
+     * Abre el socket una vez por cada tabla a recibir y almacena las tablas recibidas
+     * @param port Puerto en el que abrir el socket
+     * @throws IOException
+     * @throws ClassNotFoundException
+     * @throws InterruptedException
+     * @throws KeeperException
+     */
     private void initSocket(int port) throws IOException, ClassNotFoundException, InterruptedException, KeeperException {
         for(int i = 0; i <= (myReplicas.length); i++ ){
             ss = new ServerSocket(port);
@@ -646,10 +732,17 @@ public class DHT implements Watcher{
 
     }
 
+    /**
+     *
+     * @param integration Mensaje con las tablas a enviar
+     * @param port Puerto con el que conectarse
+     * @throws InterruptedException
+     * @throws IOException
+     */
     private void sendMessage(TableIntegration integration, int port) throws InterruptedException, IOException {
         Socket socket = new Socket("localhost", port);
         System.out.println("Connected!");
-        Thread.sleep(1000);
+        Thread.sleep(500);
         // get the output stream from the socket.
         OutputStream outputStream = socket.getOutputStream();
         // create an object output stream from the output stream so we can send an object through it
@@ -702,68 +795,73 @@ public class DHT implements Watcher{
 
         while (!exit) {
             try {
-                correct = false;
-                menuKey = 0;
-                while (!correct) {
-                    System. out .println(">>> Enter option: 1) Put. 2) Get. 3) Remove.0) Exit");
-                    if (sc.hasNextInt()) {
-                        menuKey = sc.nextInt();
-                        correct = true;
-                    } else {
-                        sc.next();
-                        System.out.println("The provised text provided is not an integer");
+                if(dht1.listenPetitions){
+                    correct = false;
+                    menuKey = 0;
+                    while (!correct) {
+                        System. out .println(">>> Enter option: 1) Put. 2) Get. 3) Remove.0) Exit");
+                        if (sc.hasNextInt()) {
+                            menuKey = sc.nextInt();
+                            correct = true;
+                        } else {
+                            sc.next();
+                            System.out.println("The provised text provided is not an integer");
+                        }
+
                     }
 
+                    switch (menuKey) {
+                        case 1: // Put
+                            System. out .print(">>> Enter name (String) = ");
+                            key = sc.next();
+
+                            System. out .print(">>> Enter account number (int) = ");
+                            if (sc.hasNextInt()) {
+                                value = sc.nextInt();
+                                dht1.putOperation(key,value);
+                            } else {
+                                System.out.println("The provised text provided is not an integer");
+                                sc.next();
+                            }
+                            break;
+
+                        case 2: // Get
+                            System. out .print(">>> Enter key (String) = ");
+                            key    = sc.next();
+                            answer  = dht1.getOperation(key);
+                            if (answer.typeAnswer == ScannerAnswerEnum.ANSWER) {
+                                value = answer.getMap().getValue();
+                                System.out.println(value);
+                            } else if (answer.typeAnswer == ScannerAnswerEnum.EXTERNAL_PETITION){
+                                System.out.println("The key: " + key + " does not exist");
+                            } else if (answer.typeAnswer == ScannerAnswerEnum.NO_KEY){
+                                System.out.println("The key: " + key + " does not exist");
+                            }
+
+                            break;
+                        case 3: // Remove
+                            System. out .print(">>> Enter key (String) = ");
+                            key    = sc.next();
+                            //if (dht.containsKey(key)) {
+                            answer  = dht1.removeOperation(key,true);
+                            if (answer.typeAnswer == ScannerAnswerEnum.ANSWER) {
+                                System.out.println("The key: " + key + " has been removed");
+                            } else if (answer.typeAnswer == ScannerAnswerEnum.EXTERNAL_PETITION){
+                                System.out.println("The key: " + key + " does not exist");
+                            } else if (answer.typeAnswer == ScannerAnswerEnum.NO_KEY){
+                                System.out.println("The key: " + key + " does not exist");
+                            }
+                            break;
+                        case 0:
+                            exit = true;
+                            //dht.close();
+                        default:
+                            break;
+                    }
+                }else{
+                    System.out.println("System is not ready");
                 }
 
-                switch (menuKey) {
-                    case 1: // Put
-                        System. out .print(">>> Enter name (String) = ");
-                        key = sc.next();
-
-                        System. out .print(">>> Enter account number (int) = ");
-                        if (sc.hasNextInt()) {
-                            value = sc.nextInt();
-                            dht1.putOperation(key,value);
-                        } else {
-                            System.out.println("The provised text provided is not an integer");
-                            sc.next();
-                        }
-                    break;
-
-                    case 2: // Get
-                        System. out .print(">>> Enter key (String) = ");
-                        key    = sc.next();
-                        answer  = dht1.getOperation(key);
-                        if (answer.typeAnswer == ScannerAnswerEnum.ANSWER) {
-                            value = answer.getMap().getValue();
-                            System.out.println(value);
-                        } else if (answer.typeAnswer == ScannerAnswerEnum.EXTERNAL_PETITION){
-                            System.out.println("The key: " + key + " does not exist");
-                        } else if (answer.typeAnswer == ScannerAnswerEnum.NO_KEY){
-                            System.out.println("The key: " + key + " does not exist");
-                        }
-
-                        break;
-                    case 3: // Remove
-                        System. out .print(">>> Enter key (String) = ");
-                        key    = sc.next();
-                        //if (dht.containsKey(key)) {
-                        answer  = dht1.removeOperation(key,true);
-                        if (answer.typeAnswer == ScannerAnswerEnum.ANSWER) {
-                            System.out.println("The key: " + key + " has been removed");
-                        } else if (answer.typeAnswer == ScannerAnswerEnum.EXTERNAL_PETITION){
-                            System.out.println("The key: " + key + " does not exist");
-                        } else if (answer.typeAnswer == ScannerAnswerEnum.NO_KEY){
-                            System.out.println("The key: " + key + " does not exist");
-                        }
-                        break;
-                    case 0:
-                        exit = true;
-                        //dht.close();
-                    default:
-                        break;
-                }
             } catch (Exception e) {
                 System.out.println("Exception at Main. Error read data");
                 System.err.println(e);

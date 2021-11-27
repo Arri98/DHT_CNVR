@@ -15,10 +15,13 @@ import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Manager del Cluster, asigna tablas y gestiona caidas.
+ */
 
 public class ClusterManager implements Watcher {
 
-    //Zookeeper configuration
+    //Zookeeper configuration y rutas
     String[] hosts;
     private ZooKeeper zk;
     private static String rootMembers;
@@ -37,10 +40,11 @@ public class ClusterManager implements Watcher {
     private String myId;
     private static final int SESSION_TIMEOUT = 5000;
 
-    private String[] DHTs;
-    private String[] temporalLeaders;
-    private int numberOfDHTs = 0;
-    private int replicationFactor;
+
+    private String[] DHTs; //Lideres de las tablas
+    private String[] temporalLeaders; //Lideress temporales de las dht
+    private int numberOfDHTs = 0; // Numero de nodos conectados
+    private int replicationFactor; //Numero de copias de cada tabla
 
     //Number of servers needed
     private int Quorum;
@@ -49,7 +53,15 @@ public class ClusterManager implements Watcher {
     //Logger configuration
     private static final Logger LOGGER = Logger.getLogger(ClusterManager.class.getName());
 
-
+    /**
+     * Constructor del CLuster manager. DHTs y temporalLeaders permite iniciar el manager en un estado determinado en
+     * caso de caida.
+     *
+     * @param Quorum Numero de nodos DHT, uno por cada tabla que tengamos
+     * @param replicationFactor Numero de copias de cada tabla
+     * @param DHTs Array con los liders de cada tabla
+     * @param temporalLeaders Array con los lideres temporales de cada tabla
+     */
 
     ClusterManager(int Quorum,int replicationFactor,String[] DHTs, String[] temporalLeaders){
         rootMembers = Common.rootMembers;
@@ -81,6 +93,11 @@ public class ClusterManager implements Watcher {
     }
 
     /* ---------------------Initialization ---------------------------------  */
+
+    /**
+     * Inicializacion del manager, conecta a zookeeper y crea los nodos necesarios para el funcionamiento de la aplicacion
+     *
+     */
 
     public void init(){
         // Select a random zookeeper server
@@ -220,7 +237,7 @@ public class ClusterManager implements Watcher {
 
      /**
      * This variable creates a new watcher. It is fired when the session
-     * is created
+     * is created.
      */
     private Watcher cWatcher = new Watcher() {
         public void process (WatchedEvent e) {
@@ -238,7 +255,6 @@ public class ClusterManager implements Watcher {
      * This variable creates a new watcher. It is fired when a child of "members"
      * is created or deleted.
      */
-
 
     private Watcher membersWatcher = new Watcher() {
         public void process(WatchedEvent event) {
@@ -301,7 +317,7 @@ public class ClusterManager implements Watcher {
                                 exists =  true;
                                 break;
                             }
-                        }
+                        } //Asignamos lider temporal
                         if(!exists){
                             LOGGER.info("Node "+ DHTs[i] + " has failed. Looking for leader for table " + i);
                             numberOfDHTs--;
@@ -328,7 +344,10 @@ public class ClusterManager implements Watcher {
 
     /* ---------------------Functions for operations---------------------------------  */
 
-    //Watcher for operations events, no hacemos nada con ellas por ahora
+    /**
+     * This variable creates a new watcher. It is fired when a child of "operations"
+     * is created or deleted.
+     */
     private Watcher operationsWatcher = new Watcher() {
         public void process(WatchedEvent event) {
           LOGGER.info("------------------ ClusterManager: Watcher for operations ------------------\n");
@@ -344,7 +363,10 @@ public class ClusterManager implements Watcher {
 
     /* ---------------------Functions for management---------------------------------  */
 
-    //Watcher for management events, los escribimos nosotros asi que no escuchamos
+    /**
+     * This variable creates a new watcher. It is fired when a child of "management"
+     * is created or deleted.
+     */
     private Watcher managementWatcher = new Watcher() {
         public void process(WatchedEvent event) {
             LOGGER.info("------------------ClusterManager:Watcher for management------------------\n");
@@ -357,10 +379,15 @@ public class ClusterManager implements Watcher {
         }
     };
 
+    /**
+     * Asigna las tablas de la siguiente manera: si tenemos 3 tablas y replicacion 2 el primer servidor es el lider de la 0 y replica de 1 y 2.
+     * el segundo lider de la 1 y replica de 2 y 0 y el tercero lider de 2 y replica de 1 y 2.
+     * @param member Id de la DHT para la que se genera el assignment
+     * @return El assigment generado
+     */
 
-    //Asigna las tablas de la siguiente manera: si tenemos 3 tablas y replicacion 2 el primer servidor es el lider de la 0 y replica de 1 y 2.
-    // el segundo lider de la 1 y replica de 2 y 0 y el tercero lider de 2 y replica de 1 y 2.
-    private TableAssigment assignTable(String member){ //member = para quien es el assignment
+
+    private TableAssigment assignTable(String member){
         int[] replicas = new int[replicationFactor];
         //Calculamos lo indicado antes.
 
@@ -393,7 +420,11 @@ public class ClusterManager implements Watcher {
         return assigment;
     }
 
-    //Escribimos la asignacion
+    /**
+     * Escribe el Assigment en zookeeper
+     * @param assigment Assigment a escribir
+     * @return Numero de la tabla a la que se le ha asignador el lider
+     */
     private int writeTableAssigment(TableAssigment assigment){
         byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
         if (zk != null) {
@@ -422,7 +453,11 @@ public class ClusterManager implements Watcher {
         return 0;
     }
 
-    //Escribimos la asignacion
+    /**
+     *
+     * @param assigment Assigment temporal a escribir
+     * @return Numero de la tabla a la que se le ha asignador el lider temporal
+     */
     private int writeTemporalTableAssigment(TableTemporalAssignment assigment){
         byte[] data = SerializationUtils.serialize(assigment); //Assignment -> byte[]
         if (zk != null) {
@@ -451,6 +486,10 @@ public class ClusterManager implements Watcher {
         return 0;
     }
 
+    /**
+     * Crea un asignacion temporal de lider
+     * @param i Numero de la tabla para la que hay que generar el assigment
+     */
     private void assignTemporalLeader(int i) {
         int position = i;
         Boolean replicaFound = false;
@@ -459,7 +498,7 @@ public class ClusterManager implements Watcher {
             if((position)<0){
                 position = Quorum-1;
             }
-            if(DHTs[position] != null){
+            if(DHTs[position] != null){ //Buscamos un DHT conectgado
                 temporalLeaders[i] = DHTs[position];
                 LOGGER.info("Temporal leader is: " + DHTs[position]);
                 replicaFound = true;

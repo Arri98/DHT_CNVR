@@ -7,6 +7,10 @@ import java.util.Iterator;
 import java.util.Set;
 import java.io.Serializable;
 
+/**
+ * @author aalonso
+ */
+
 public class DHTHashMap implements DHTUserInterface, Serializable{
 	
 	private static final long serialVersionUID = 1L;
