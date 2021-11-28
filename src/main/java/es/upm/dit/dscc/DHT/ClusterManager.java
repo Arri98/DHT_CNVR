@@ -546,14 +546,33 @@ public class ClusterManager implements Watcher {
 
 
     public static void main(String[] args) {
-        System.setProperty("java.util.logging.SimpleFormatter.format",
-                "[%4$-7s] %5$s %n");
-        ConsoleHandler handler = new ConsoleHandler();
-        handler.setLevel(Level.WARNING);
-        LOGGER.addHandler(handler);
-        LOGGER.setLevel(Level.WARNING);
+
+        System.setProperty("java.util.logging.SimpleFormatter.format", "%5$s %n");
         LOGGER.setLevel(Level.INFO);
-        ClusterManager clusterManager = new ClusterManager(4,2,null,null);
+
+        int Q ;
+        int R;
+        LOGGER.fine(String.valueOf(args.length));
+        if(args.length >= 1){
+            Q = Integer.parseInt(args[0]);
+        }else {
+            Q = 4;
+        }
+
+        if(args.length >=2){
+            R = Integer.parseInt(args[1]);
+        }else {
+            R = 2;
+        }
+        LOGGER.info("Quorum is " + Q );
+        LOGGER.info("Replication factor is " + R);
+        if(R>Q){
+            LOGGER.severe("Replication factor can not be greater than quorum");
+            System.exit(2);
+        }
+
+
+        ClusterManager clusterManager = new ClusterManager(Q,R,null,null);
         clusterManager.init();
         LOGGER.info("Inited manager");
         try {
