@@ -544,6 +544,10 @@ public class ClusterManager implements Watcher {
         }
     }
 
+        /**
+         * Para iniciar el programa con quorum y replication factor personalizado.
+         * @param args Args [0] = Quorum (int), args[1] = replication factor(int)
+        */
 
     public static void main(String[] args) {
 
