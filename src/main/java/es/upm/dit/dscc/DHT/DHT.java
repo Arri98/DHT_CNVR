@@ -5,11 +5,16 @@ import org.apache.commons.lang.SerializationUtils;
 import org.apache.zookeeper.*;
 import org.apache.zookeeper.data.Stat;
 
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -17,7 +22,7 @@ import java.util.logging.Logger;
 /**
  * Nodo de la DHT. Envia y recibe peticiones, integra tablas.
  */
-public class DHT implements Watcher{
+public class DHT extends JFrame implements Watcher, ActionListener {
 
     String[] hosts;
     private ZooKeeper zk;
@@ -51,6 +56,17 @@ public class DHT implements Watcher{
     private static final Logger LOGGER = Logger.getLogger(DHT.class.getName());
 
     private ServerSocket ss;
+
+    //UI
+    private JButton b1;
+    private JButton b2;
+    private JButton b3;
+    private TextField textField1;
+    private TextField textField2;
+    private TextField textField3;
+
+
+
 
     /**
      * Constructor
@@ -215,6 +231,8 @@ public class DHT implements Watcher{
                 if(!barrierUp){
                     LOGGER.info("Quorum reached, listening petitions now");
                     listenPetitions = true;
+                }else{
+                    LOGGER.info("Barrier up");
                 }
             } catch (Exception e) {
                 LOGGER.warning("Exception: managementWatcher");
@@ -305,7 +323,7 @@ public class DHT implements Watcher{
             }
         }
     };
-    
+
     /**
      * Leemos la clase asigment y vemos si tenemos que actualizar algo
      * @param list Lista recibida del nodo table assigments
@@ -361,6 +379,7 @@ public class DHT implements Watcher{
                         LOGGER.info("I am temporal leader for table:"+ assigment.getTableLeader());
                         temporalLeaderOfTables[ assigment.getTableLeader()] = true;
                         LOGGER.info("\n");
+                        Thread.sleep(100);
                         zk.delete(rootManagement+ temporalAssignments+"/"+ string,s.getVersion());
                     }else{
                         LOGGER.info("I am "+ myId + " and this temporal assignment is for " + assigment.getDHTId() );
@@ -469,9 +488,12 @@ public class DHT implements Watcher{
                         DHTResponse dhtResponse = (DHTResponse) SerializationUtils.deserialize(data); //byte -> Response
                         if(dhtResponse.getMap() != null){
                             LOGGER.info("Response for petition "+response+ "is "+ dhtResponse.getMap().getValue() );
-                            LOGGER.warning(String.valueOf(dhtResponse.getMap().getValue()));
+                            LOGGER.info(String.valueOf(dhtResponse.getMap().getValue()));
+                            textField3.setText(String.valueOf(dhtResponse.getMap().getValue()));
+
                         }else{
                             LOGGER.info("Emptry response for petition "+response);
+                            textField3.setText("Emptry response for petition "+response);
                         }
 
                         myPetitions.remove(response);
@@ -775,11 +797,84 @@ public class DHT implements Watcher{
         }
     }
 
+    public void actionPerformed(ActionEvent e) {
+        if (e.getSource() == b1) {
+            String key = textField1.getText();
+            ScannerAnswer answer =  getOperation(key);
+            if (answer.typeAnswer == ScannerAnswerEnum.ANSWER) {
+                int value = answer.getMap().getValue();
+                textField3.setText(String.valueOf(value));
+            } else if (answer.typeAnswer == ScannerAnswerEnum.EXTERNAL_PETITION){
+                textField3.setText("The key: " + key + " does not exist");
+            } else if (answer.typeAnswer == ScannerAnswerEnum.NO_KEY){
+                textField3.setText("The key: " + key + " does not exist");
+            }
+        }else if (e.getSource() == b2) {
+            putOperation(textField1.getText(), Integer.parseInt(textField2.getText()));
+            textField3.setText("Put done");
+        }else if (e.getSource() == b3) {
+            ScannerAnswer answer  = removeOperation(textField1.getText(),true);
+            if (answer.typeAnswer == ScannerAnswerEnum.ANSWER) {
+                textField3.setText("The key: " + textField1.getText() + " has been removed");
+            } else if (answer.typeAnswer == ScannerAnswerEnum.EXTERNAL_PETITION){
+                textField3.setText("The key: " + textField1.getText() + " does not exist");
+            } else if (answer.typeAnswer == ScannerAnswerEnum.NO_KEY){
+                textField3.setText("The key: " + textField1.getText() + " does not exist");
+            }
+        }
+    }
+
+    private void drawUI(){
+        JFrame f = new JFrame();
+        f.setBounds(10,10,400,400);
+        f.getContentPane().setLayout(new BorderLayout());
+        f.getContentPane().add(new TextField());
+
+        textField1 = new TextField();
+        textField1.setBounds(0,0,200,100);
+        f.getContentPane().add(textField1);
+
+        textField2 = new TextField();
+        textField2.setBounds(200,0,200,100);
+        f.getContentPane().add(textField2);
+
+        textField3 = new TextField();
+        textField3.setBounds(0,200,400,100);
+        f.getContentPane().add(textField3);
+
+        b1 = new JButton("GET");
+        b1.setBounds(0,100,133,100);
+        b1.addActionListener(this);
+        f.getContentPane().add(b1);
+
+        b2 = new JButton("PUT");
+        b2.setBounds(133,100,133,100);
+        b2.addActionListener(this);
+        f.getContentPane().add(b2);
+
+
+        b3 = new JButton("REMOVE");
+        b3.setBounds(266,100,134,100);
+        b3.addActionListener(this);
+        f.getContentPane().add(b3);
+
+        f.getContentPane().add(new TextField());
+        f.setVisible(true);
+
+        textField1.setText("Key");
+        textField2.setText("Value");
+        textField3.setText("Responses");
+
+    }
+
+
 
     public static void main(String[] args) {
         System.setProperty("java.util.logging.SimpleFormatter.format", "%5$s %n");
+
         LOGGER.setLevel(Level.FINE);
         DHT dht1 = new DHT();
+        dht1.drawUI();
         System.out.println("New DHT");
         dht1.init();
         System.out.println("Inited");
@@ -791,7 +886,6 @@ public class DHT implements Watcher{
         String  key    = null;
         Integer value   = 0;
         ScannerAnswer answer;
-
 
         while (!exit) {
             try {
@@ -833,7 +927,7 @@ public class DHT implements Watcher{
                                 value = answer.getMap().getValue();
                                 System.out.println(value);
                             } else if (answer.typeAnswer == ScannerAnswerEnum.EXTERNAL_PETITION){
-                                System.out.println("The key: " + key + " does not exist");
+                                System.out.println("The key: " + key + " does not exist locally, getting value");
                             } else if (answer.typeAnswer == ScannerAnswerEnum.NO_KEY){
                                 System.out.println("The key: " + key + " does not exist");
                             }
@@ -859,9 +953,8 @@ public class DHT implements Watcher{
                             break;
                     }
                 }else{
-                    System.out.println("System is not ready");
+                    Thread.sleep(1000);
                 }
-
             } catch (Exception e) {
                 System.out.println("Exception at Main. Error read data");
                 System.err.println(e);
